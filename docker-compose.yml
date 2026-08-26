@@ -1,0 +1,48 @@
+# =============================================================================
+# Local evaluation of useSend — try the dashboard/API before deploying to AWS.
+# Transactional-only: Postgres + Redis + the app. Object storage (MinIO) is
+# omitted because useSend only needs it for optional editor image uploads.
+#
+#   cp .env.example .env   # then fill NEXTAUTH_SECRET + GitHub OAuth
+#   docker compose up -d
+#   open http://localhost:3000
+# =============================================================================
+name: usesend-local
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-usesend}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-usesend}
+      POSTGRES_DB: ${POSTGRES_DB:-usesend}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-usesend}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    # noeviction is required so BullMQ jobs are never dropped under memory pressure.
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+
+  usesend:
+    image: usesend/usesend:latest
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

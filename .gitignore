@@ -1,0 +1,39 @@
+# ---- secrets & local env ----
+.env
+.env.*
+!.env.example
+*.tfvars
+!*.tfvars.example
+*.auto.tfvars
+
+# ---- terraform ----
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+plan.out
+*.tfplan
+
+# ---- aws / creds ----
+.aws/
+*.pem
+*.key
+
+# ---- node / build (if you clone useSend source locally) ----
+node_modules/
+dist/
+.next/
+
+# ---- os / editor ----
+.DS_Store
+*.swp
+.idea/
+.vscode/

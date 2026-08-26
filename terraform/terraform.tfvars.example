@@ -1,0 +1,27 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+aws_region   = "us-east-1"
+project_name = "usesend"
+
+# The hostname useSend's dashboard + API are served on.
+app_domain = "mail.yourcompany.com"
+
+# Hosted zone that app_domain lives in. Terraform will create the ACM
+# validation records and the app DNS record. Leave "" to manage DNS yourself
+# (then also set acm_certificate_arn to a cert you validated).
+route53_zone_id = "Z0123456789ABCDEFGHIJ"
+# acm_certificate_arn = "arn:aws:acm:us-east-1:1234567890:certificate/xxxxxxxx"
+
+# GitHub OAuth App for dashboard login (Settings > Developer settings > OAuth Apps).
+# Authorization callback URL = https://<app_domain>/api/auth/callback/github
+github_client_id = "Iv1.xxxxxxxxxxxxxxxx"
+# Prefer NOT putting the secret in this file. Instead export it:
+#   export TF_VAR_github_client_secret='...'
+# github_client_secret = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ---- sizing (override the defaults in variables.tf as needed) ----
+db_multi_az       = true
+db_instance_class = "db.t4g.small"
+redis_node_type   = "cache.t4g.micro"
+app_desired_count = 2
+nat_per_az        = false
