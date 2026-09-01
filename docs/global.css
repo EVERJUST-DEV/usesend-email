@@ -1,0 +1,140 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+@source "./app/**/*.tsx";
+@source "./components/**/*.tsx";
+@source "./lib/**/*.tsx";
+@source "./mdx-components.tsx";
+@source "./content/**/*.mdx";
+
+:root {
+  --ca-accent: #18181b;
+  --ca-accent-strong: #000;
+  --ca-accent-soft: rgba(0, 0, 0, 0.07);
+  --ca-accent-line: rgba(0, 0, 0, 0.18);
+}
+.dark {
+  --ca-accent: #ffffff;
+  --ca-accent-strong: #e4e4e7;
+  --ca-accent-soft: rgba(255, 255, 255, 0.10);
+  --ca-accent-line: rgba(255, 255, 255, 0.20);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.btn-primary {
+  @apply inline-flex items-center justify-center rounded-lg bg-fd-primary px-5 py-2.5 text-sm font-semibold text-fd-primary-foreground shadow-sm transition-all hover:bg-fd-primary/90;
+}
+.btn-secondary {
+  @apply inline-flex items-center justify-center rounded-lg border border-fd-border bg-fd-background px-5 py-2.5 text-sm font-semibold text-fd-foreground transition-colors hover:bg-fd-accent;
+}
+
+/* editorial display heading */
+.ca-display {
+  font-family: var(--font-display), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  letter-spacing: -0.022em;
+}
+
+/* hairline divider used between sections */
+.ca-rule {
+  @apply h-px w-full bg-fd-border;
+}
+
+/* tiny eyebrow label */
+.ca-eyebrow {
+  @apply inline-flex items-center gap-2.5 text-[11px] font-bold uppercase tracking-[0.2em];
+  color: var(--ca-accent);
+}
+.ca-eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 1.5rem;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ca-accent);
+}
+
+/* accent text + link helpers */
+.ca-accent { color: var(--ca-accent); }
+.ca-link {
+  color: var(--ca-accent);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.ca-link:hover { color: var(--ca-accent-strong); }
+
+/* hand-marker underline for emphasized hero phrase */
+.ca-marker {
+  position: relative;
+  white-space: nowrap;
+}
+.ca-marker::after {
+  content: "";
+  position: absolute;
+  left: -0.04em;
+  right: -0.04em;
+  bottom: 0.04em;
+  height: 0.36em;
+  z-index: -1;
+  background: rgba(0,0,0,0.06);
+  border-bottom: 3px solid #18181b;
+  border-radius: 2px;
+  transform: rotate(-0.6deg);
+}
+.dark .ca-marker::after {
+  background: rgba(255,255,255,0.08);
+  border-bottom: 3px solid rgba(255,255,255,0.6);
+}
+/* marker variant for dark backgrounds — stronger glow, no bg fill */
+.ca-marker-dark {
+  position: relative;
+  white-space: nowrap;
+}
+.ca-marker-dark::after {
+  content: "";
+  position: absolute;
+  left: -0.02em;
+  right: -0.02em;
+  bottom: 0.06em;
+  height: 0.18em;
+  z-index: -1;
+  background: rgba(255,255,255,0.12);
+  border-bottom: 3px solid rgba(255,255,255,0.5);
+  border-radius: 2px;
+  filter: blur(0.5px);
+  transform: rotate(-0.5deg);
+}
+
+/* subtle grid texture for section atmosphere */
+.ca-grid {
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
+}
+.dark .ca-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+}
+
+/* marquee */
+@keyframes ca-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.ca-marquee {
+  animation: ca-marquee 50s linear infinite;
+}
+.ca-marquee:hover { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .ca-marquee { animation: none; }
+}

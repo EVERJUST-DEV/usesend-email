@@ -1,0 +1,26 @@
+{
+  "title": "useSend",
+  "root": true,
+  "pages": [
+    "index",
+    "quickstart",
+    "onboard-a-product",
+    "---Reference---",
+    "api",
+    "sending-email",
+    "domains",
+    "contacts",
+    "webhooks",
+    "---Migration & SMTP---",
+    "migrate-from-resend",
+    "smtp",
+    "---AI & Agents---",
+    "mcp",
+    "ai-agents",
+    "---Platform---",
+    "architecture",
+    "operations",
+    "tenant-isolation",
+    "troubleshooting"
+  ]
+}
