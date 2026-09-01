@@ -5,7 +5,7 @@ description: Send through useSend from any app that speaks SMTP, using the optio
 
 useSend ships an optional **SMTP proxy** — the Docker image `usesend/smtp-proxy` — that accepts standard SMTP connections and forwards each message to the useSend instance API. Use it for frameworks and apps that only speak SMTP: Nodemailer, Supabase Auth, Django, Rails, WordPress, and similar.
 
-The proxy is a thin translator. It does not touch SES directly — it authenticates the SMTP session, then calls the same `POST /api/v1/emails` endpoint the [Send Email](/docs/send-email) API uses. Everything downstream (domain verification, DKIM/SPF/DMARC, SES sending) is identical to the API path.
+The proxy is a thin translator. It does not touch SES directly — it authenticates the SMTP session, then calls the same `POST /api/v1/emails` endpoint the [Send Email](/sending-email) API uses. Everything downstream (domain verification, DKIM/SPF/DMARC, SES sending) is identical to the API path.
 
 <Callout type="warn">
 For most EverJust products, prefer the HTTP API over SMTP. The API is simpler to secure, easier to observe, and avoids the port-25 pitfalls below. Reach for SMTP only when a third-party app cannot be configured to call an HTTP API.
@@ -64,7 +64,7 @@ The proxy must be network-reachable from whatever app connects to it. If you dep
 Choose **implicit TLS (465 / 2465)** or **STARTTLS (587 / 2587)** based on what your client library supports. The `2xxx` variants exist so the proxy can run somewhere that already occupies the standard ports.
 
 <Callout type="error">
-AWS blocks outbound TCP port **25** by default on EC2 and Lambda. If your sending app runs on AWS, connecting to the proxy on port 25 will time out. Use 587/2587 (STARTTLS) or 465/2465 (implicit TLS) instead — and for AWS-hosted senders, the [HTTP API](/docs/send-email) avoids the problem entirely.
+AWS blocks outbound TCP port **25** by default on EC2 and Lambda. If your sending app runs on AWS, connecting to the proxy on port 25 will time out. Use 587/2587 (STARTTLS) or 465/2465 (implicit TLS) instead — and for AWS-hosted senders, the [HTTP API](/sending-email) avoids the problem entirely.
 </Callout>
 
 ## Credentials
@@ -142,6 +142,6 @@ Ensure `secure`/encryption matches the port: implicit TLS for 465/2465, STARTTLS
 </Accordions>
 
 <Cards>
-<Card title="Send Email (API)" href="/docs/send-email">The HTTP path — preferred for AWS-hosted senders and new integrations.</Card>
-<Card title="Domains" href="/docs/domains">Verify sending domains and check DKIM/SPF/DMARC status.</Card>
+<Card title="Send Email (API)" href="/sending-email">The HTTP path — preferred for AWS-hosted senders and new integrations.</Card>
+<Card title="Domains" href="/domains">Verify sending domains and check DKIM/SPF/DMARC status.</Card>
 </Cards>

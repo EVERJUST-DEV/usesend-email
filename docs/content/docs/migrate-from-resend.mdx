@@ -22,7 +22,7 @@ useSend is self-hosted at `https://mail.everjust.app`. Rate limiting is **disabl
 | React Email | Supported | Supported (`react` payload field, Node SDK) |
 | Idempotency | `Idempotency-Key` header | `Idempotency-Key` header |
 | Tenancy | Account | Team (one Team per product) |
-| Domains / DNS | Managed by Resend | You manage them — see [Onboard a product](/docs/onboard-a-product) |
+| Domains / DNS | Managed by Resend | You manage them — see [Onboard a product](/onboard-a-product) |
 
 The send response shape differs slightly: Resend returns `{ id }`, useSend returns `{ emailId }`. Through the SDK both are wrapped as `{ data, error }`.
 
@@ -197,7 +197,7 @@ await usesend.emails.send(payload, { idempotencyKey: "order-4821-welcome" });
 ```
 </Accordion>
 <Accordion title="You own the sending domains and DNS">
-Resend provisions and tracks your domain records for you. On useSend, sending domains live in your Team and you publish the DKIM/SPF/DMARC/MAIL FROM records yourself. `send.everjust.app` is already verified; adding another domain is covered in [Onboard a product](/docs/onboard-a-product).
+Resend provisions and tracks your domain records for you. On useSend, sending domains live in your Team and you publish the DKIM/SPF/DMARC/MAIL FROM records yourself. `send.everjust.app` is already verified; adding another domain is covered in [Onboard a product](/onboard-a-product).
 </Accordion>
 </Accordions>
 
@@ -207,13 +207,13 @@ Cut over gradually rather than flipping everything at once. Because rate limitin
 
 <Steps>
 <Step>
-**Provision the Team and domain.** Confirm your product has a useSend Team, a verified sending domain, and a `us_` API key. For a brand-new product domain, follow [Onboard a product](/docs/onboard-a-product) and wait for DKIM/SPF/DMARC to verify.
+**Provision the Team and domain.** Confirm your product has a useSend Team, a verified sending domain, and a `us_` API key. For a brand-new product domain, follow [Onboard a product](/onboard-a-product) and wait for DKIM/SPF/DMARC to verify.
 </Step>
 <Step>
 **Dual-send / shadow.** Wrap your send call so it fires through useSend in addition to (or as a percentage split from) Resend. Log the returned `emailId` and any `error`. While SES is in sandbox, point the shadow traffic at the SES simulator addresses so you exercise the path without needing production access.
 </Step>
 <Step>
-**Watch deliverability.** Monitor useSend's analytics — [`GET /v1/analytics/email-time-series`](/docs/analytics) for sent/delivered/bounced trends and `GET /v1/analytics/reputation-metrics` for bounce and complaint rates. Wire up [webhooks](/docs/webhooks) (`email.delivered`, `email.bounced`, `email.complained`) so failures surface in real time. Do not proceed until delivered rates match your Resend baseline.
+**Watch deliverability.** Monitor useSend's analytics — [`GET /v1/analytics/email-time-series`](/api) for sent/delivered/bounced trends and `GET /v1/analytics/reputation-metrics` for bounce and complaint rates. Wire up [webhooks](/webhooks) (`email.delivered`, `email.bounced`, `email.complained`) so failures surface in real time. Do not proceed until delivered rates match your Resend baseline.
 </Step>
 <Step>
 **Get SES production access, then flip.** Once AWS grants production access, useSend can send to any recipient. Move real traffic over — shift the percentage split to 100% useSend, keeping Resend as a fallback for one more cycle.
@@ -229,11 +229,11 @@ Don't remove the Resend DNS records until your useSend domain shows `status: SUC
 
 ## SMTP relay for apps that only speak SMTP
 
-If a product can't easily swap HTTP clients — or was pointed at Resend's SMTP endpoint rather than its API — useSend offers an **SMTP relay** as a drop-in. Point the app at the useSend SMTP host with the `us_` API key as the password and no code change is needed. See [SMTP relay](/docs/smtp) for host, port, and credentials.
+If a product can't easily swap HTTP clients — or was pointed at Resend's SMTP endpoint rather than its API — useSend offers an **SMTP relay** as a drop-in. Point the app at the useSend SMTP host with the `us_` API key as the password and no code change is needed. See [SMTP relay](/smtp) for host, port, and credentials.
 
 <Cards>
-<Card title="Onboard a product" href="/docs/onboard-a-product">Create a Team, add a sending domain, and publish DNS.</Card>
-<Card title="SMTP relay" href="/docs/smtp">Drop-in SMTP for apps that don't use the HTTP API.</Card>
-<Card title="Webhooks" href="/docs/webhooks">Track delivery, bounces, and complaints in real time.</Card>
-<Card title="Analytics" href="/docs/analytics">Time-series and reputation metrics for deliverability.</Card>
+<Card title="Onboard a product" href="/onboard-a-product">Create a Team, add a sending domain, and publish DNS.</Card>
+<Card title="SMTP relay" href="/smtp">Drop-in SMTP for apps that don't use the HTTP API.</Card>
+<Card title="Webhooks" href="/webhooks">Track delivery, bounces, and complaints in real time.</Card>
+<Card title="Analytics" href="/api">Time-series and reputation metrics for deliverability.</Card>
 </Cards>

@@ -1,6 +1,7 @@
 name: Docs
 
-# Rebuild + redeploy the docs whenever anything in docs/ changes (or on demand).
+# Validates the Fumadocs static export builds under the /docs base path.
+# (Container build + ECS deploy to mail.everjust.app/docs are added next.)
 on:
   push:
     branches: [main]
@@ -11,16 +12,8 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
-  # Build always runs — it validates the Fumadocs static export even if Pages
-  # isn't enabled yet (private-repo Pages needs a paid plan).
   build:
     runs-on: ubuntu-latest
     defaults:
@@ -33,34 +26,7 @@ jobs:
           node-version: 20
       - name: Install
         run: npm install --legacy-peer-deps
-      - name: Build (Next static export)
+      - name: Build (Next static export, basePath /docs)
         run: npm run build
-        env:
-          # Served at the root of the custom domain docs.everjust.app (see the
-          # CNAME file in docs/public), so no base path.
-          NEXT_PUBLIC_BASE_PATH: ""
-          NEXT_PUBLIC_SITE_URL: https://docs.everjust.app
-      - name: Disable Jekyll (serve _next/ as-is)
-        run: touch out/.nojekyll
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/out
-
-  # Deploy runs only if GitHub Pages is enabled for the repo (Settings → Pages →
-  # Source: GitHub Actions). If it isn't, this job fails harmlessly and the build
-  # above still confirms the docs compile.
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    # Soft-fail while Pages is disabled (private-repo Pages needs a paid plan), so
-    # the build stays green. Once Pages is enabled (Settings → Pages → Source:
-    # GitHub Actions), this deploys automatically on every docs change.
-    continue-on-error: true
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Verify /docs base path nesting
+        run: test -f out/docs/index.html && echo "out/docs/index.html present ✓" || (echo "MISSING out/docs/index.html"; exit 1)

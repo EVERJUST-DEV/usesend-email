@@ -6,7 +6,7 @@ export const dynamic = 'force-static';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL || 'https://everjust-dev.github.io/usesend-email';
+    process.env.NEXT_PUBLIC_SITE_URL || 'https://mail.everjust.app/docs';
   const now = new Date();
 
   // Get all documentation pages from Fumadocs

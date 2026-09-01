@@ -35,7 +35,7 @@ The send endpoint accepts a single JSON object. You must supply `to`, `from`, on
 | `inReplyToId` | `string \| null` | No | A useSend `emailId` to thread this message as a reply. |
 
 <Callout type="info">
-**Not supported by the API:** `tags`, and on attachments `path` / `contentType`. Attachment bodies must be inlined as base64 `content`. Template CRUD, suppressions, webhooks, and API-key creation are dashboard-only — see [Webhooks](/docs/webhooks) and [Domains](/docs/domains).
+**Not supported by the API:** `tags`, and on attachments `path` / `contentType`. Attachment bodies must be inlined as base64 `content`. Template CRUD, suppressions, webhooks, and API-key creation are dashboard-only — see [Webhooks](/webhooks) and [Domains](/domains).
 </Callout>
 
 A successful send returns `200`:
@@ -378,7 +378,7 @@ curl https://mail.everjust.app/api/v1/emails/cuid_abc123 \
 }
 ```
 
-To list sent email, use `GET /v1/emails` with `page`, `limit`, `startDate`, `endDate`, and `domainId` query parameters. For push-based delivery of these transitions, configure [Webhooks](/docs/webhooks).
+To list sent email, use `GET /v1/emails` with `page`, `limit`, `startDate`, `endDate`, and `domainId` query parameters. For push-based delivery of these transitions, configure [Webhooks](/webhooks).
 
 ## Errors
 
@@ -391,6 +391,6 @@ Failed requests return the standard error envelope:
 Codes: `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `NOT_UNIQUE` (409), `RATE_LIMITED` (429), `INTERNAL_SERVER_ERROR` (500). Because rate limiting is disabled on this instance, `RATE_LIMITED` is not returned in normal operation.
 
 <Cards>
-  <Card title="Domains" href="/docs/domains">Verify and inspect sending domains.</Card>
-  <Card title="Webhooks" href="/docs/webhooks">Receive delivery, bounce, open, and click events.</Card>
+  <Card title="Domains" href="/domains">Verify and inspect sending domains.</Card>
+  <Card title="Webhooks" href="/webhooks">Receive delivery, bounce, open, and click events.</Card>
 </Cards>

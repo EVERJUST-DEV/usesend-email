@@ -11,7 +11,7 @@ The dashboard is live at **[mail.everjust.app](https://mail.everjust.app)** and 
 
 - **$0 per sending domain.** SES bills per email (~$0.10 per 1,000), never per domain. Add as many verified domains as products need at no marginal cost — the opposite of Resend's per-domain pricing.
 - **Self-hosted, one AWS account.** All email flows through infrastructure we own. No third-party sees the message bodies, and there is no external quota to buy.
-- **Near drop-in for Resend.** The send payload mirrors Resend's (`from` / `to` / `subject` / `html` / `text`), so migrating a product is mostly a base-URL and API-key swap. See [Migrate from Resend](/docs/migrate-from-resend).
+- **Near drop-in for Resend.** The send payload mirrors Resend's (`from` / `to` / `subject` / `html` / `text`), so migrating a product is mostly a base-URL and API-key swap. See [Migrate from Resend](/migrate-from-resend).
 - **Multi-tenant by design.** One deployment serves every product, each isolated into its own tenant.
 
 ## Tenancy model
@@ -109,10 +109,10 @@ usesend.emails.send({
 ## Where to go next
 
 <Cards>
-  <Card title="Quickstart" href="/docs/quickstart">Send your first email with the existing EverJust key in a few minutes.</Card>
-  <Card title="Onboard a product" href="/docs/onboard-a-product">Stand up a new tenant — a Team, its sending domain(s), and an API key.</Card>
-  <Card title="API reference" href="/docs/api">Endpoints, request and response fields, and authentication details.</Card>
-  <Card title="Migrate from Resend" href="/docs/migrate-from-resend">Swap base URL and key, port templates, and shadow-send before cutover.</Card>
-  <Card title="MCP server" href="/docs/mcp">Drive useSend from AI agents through the Model Context Protocol server.</Card>
-  <Card title="Architecture" href="/docs/architecture">The AWS stack — ECS, RDS, Redis, ALB — and how mail flows through SES.</Card>
+  <Card title="Quickstart" href="/quickstart">Send your first email with the existing EverJust key in a few minutes.</Card>
+  <Card title="Onboard a product" href="/onboard-a-product">Stand up a new tenant — a Team, its sending domain(s), and an API key.</Card>
+  <Card title="API reference" href="/api">Endpoints, request and response fields, and authentication details.</Card>
+  <Card title="Migrate from Resend" href="/migrate-from-resend">Swap base URL and key, port templates, and shadow-send before cutover.</Card>
+  <Card title="MCP server" href="/mcp">Drive useSend from AI agents through the Model Context Protocol server.</Card>
+  <Card title="Architecture" href="/architecture">The AWS stack — ECS, RDS, Redis, ALB — and how mail flows through SES.</Card>
 </Cards>

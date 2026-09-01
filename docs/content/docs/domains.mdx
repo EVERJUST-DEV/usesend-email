@@ -6,7 +6,7 @@ description: Create, list, verify, and delete sending domains through the useSen
 Sending domains are the addresses your product sends *from*. Each domain belongs to a Team (tenant) and must complete DNS-based verification — DKIM, SPF, and MAIL FROM — before it can send. This page documents the REST endpoints for managing domains programmatically.
 
 <Callout type="info">
-The EverJust Team already has a verified sending domain, **`send.everjust.app`** (`status: SUCCESS`). You only need these endpoints when adding a new domain. To send mail from an existing domain, see [Send an email](/docs/emails).
+The EverJust Team already has a verified sending domain, **`send.everjust.app`** (`status: SUCCESS`). You only need these endpoints when adding a new domain. To send mail from an existing domain, see [Send an email](/sending-email).
 </Callout>
 
 ## Base URL and auth
@@ -362,10 +362,10 @@ Errors use the standard envelope:
 | `INTERNAL_SERVER_ERROR` | 500 | Unexpected server error. |
 
 <Cards>
-  <Card title="Send an email" href="/docs/emails">
+  <Card title="Send an email" href="/sending-email">
     Use a verified domain in the `from` address to send transactional mail.
   </Card>
-  <Card title="Analytics" href="/docs/analytics">
+  <Card title="Analytics" href="/api">
     Reputation and delivery metrics, filterable by `domainId`.
   </Card>
 </Cards>

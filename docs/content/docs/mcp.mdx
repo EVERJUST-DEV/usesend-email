@@ -5,7 +5,7 @@ description: Run the useSend MCP server so AI agents like Claude Code, Claude De
 
 The repo ships an [MCP](https://modelcontextprotocol.io) server under `mcp/` — a Node/TypeScript server that speaks the Model Context Protocol over **stdio**. It exposes the useSend REST API as a set of tools so an AI agent can send transactional email, manage sending domains, maintain contact books, run campaigns, and read analytics against the EverJust instance at `https://mail.everjust.app`.
 
-It is a thin wrapper over the [REST API](/docs/api-reference): every tool maps to one endpoint, authenticates with a `us_` Bearer key, and returns the raw JSON envelope. Anything the API can do, the agent can do.
+It is a thin wrapper over the [REST API](/api): every tool maps to one endpoint, authenticates with a `us_` Bearer key, and returns the raw JSON envelope. Anything the API can do, the agent can do.
 
 <Callout type="warn">
   A useSend API key grants **send access** to a Team — anything holding it can send mail as your domains and read your contacts. Scope one key per product (one Team per product), pass it to the server through the environment only, and **never commit it** to the repo or an MCP config that lives in version control.
@@ -53,7 +53,7 @@ The process serves MCP over stdio and stays attached to the client that launched
 </Steps>
 
 <Callout type="info">
-  Rate limiting is **disabled** on the self-hosted instance, so the server does not back off or throttle. SES is currently in **sandbox**: sends only reach verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@…`, `complaint@…`) until AWS grants production access. See [Sending email](/docs/emails) for details.
+  Rate limiting is **disabled** on the self-hosted instance, so the server does not back off or throttle. SES is currently in **sandbox**: sends only reach verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@…`, `complaint@…`) until AWS grants production access. See [Sending email](/sending-email) for details.
 </Callout>
 
 ## Client configuration
@@ -107,7 +107,7 @@ Replace `/abs/path/usesend-email` with the real checkout location and `us_...` w
 
 ## Tools
 
-Every tool corresponds to one REST endpoint. Fields, enums, and response shapes match the [API reference](/docs/api-reference) exactly — the server neither adds nor renames fields.
+Every tool corresponds to one REST endpoint. Fields, enums, and response shapes match the [API reference](/api) exactly — the server neither adds nor renames fields.
 
 ### Emails
 
@@ -190,8 +190,8 @@ The agent calls `send_email`, then `get_email` with the returned `emailId` to re
 ## Next steps
 
 <Cards>
-  <Card title="Sending email" href="/docs/emails">The send payload, scheduling, sandbox rules, and status enum.</Card>
-  <Card title="API reference" href="/docs/api-reference">Every endpoint, field, and error code the tools wrap.</Card>
-  <Card title="Domains" href="/docs/domains">Provisioning and verifying sending domains.</Card>
-  <Card title="Webhooks" href="/docs/webhooks">Delivery events and signature verification (dashboard-configured).</Card>
+  <Card title="Sending email" href="/sending-email">The send payload, scheduling, sandbox rules, and status enum.</Card>
+  <Card title="API reference" href="/api">Every endpoint, field, and error code the tools wrap.</Card>
+  <Card title="Domains" href="/domains">Provisioning and verifying sending domains.</Card>
+  <Card title="Webhooks" href="/webhooks">Delivery events and signature verification (dashboard-configured).</Card>
 </Cards>

@@ -49,7 +49,7 @@ curl https://mail.everjust.app/api/v1/domains/1 \
   -H "Authorization: Bearer us_xxx"
 ```
 
-The `status` field should read `SUCCESS`. The path id is the domain's numeric id — see [Domains](/docs/domains).
+The `status` field should read `SUCCESS`. The path id is the domain's numeric id — see [Domains](/domains).
 
 </Accordion>
 
@@ -125,7 +125,7 @@ curl "https://mail.everjust.app/api/v1/analytics/reputation-metrics?domainId=1" 
   -H "Authorization: Bearer us_xxx"
 ```
 
-The response returns `bounceRate` and `complaintRate`. Mitigate by sending only to addresses that opted in, removing hard-bounced recipients promptly, and honoring complaints. See [Analytics](/docs/analytics).
+The response returns `bounceRate` and `complaintRate`. Mitigate by sending only to addresses that opted in, removing hard-bounced recipients promptly, and honoring complaints. See [Analytics](/api).
 
 </Accordion>
 
@@ -158,9 +158,9 @@ If you see one, you are almost certainly hitting **useSend Cloud** (the hosted s
 ## Still stuck
 
 <Cards>
-  <Card title="Sending email" href="/docs/emails">Payload fields, batch, scheduling, and status codes.</Card>
-  <Card title="Domains" href="/docs/domains">Add and verify sending domains, read DNS records.</Card>
-  <Card title="Webhooks" href="/docs/webhooks">Delivery events and signature verification.</Card>
+  <Card title="Sending email" href="/sending-email">Payload fields, batch, scheduling, and status codes.</Card>
+  <Card title="Domains" href="/domains">Add and verify sending domains, read DNS records.</Card>
+  <Card title="Webhooks" href="/webhooks">Delivery events and signature verification.</Card>
 </Cards>
 
 If a problem persists after these steps, check the deployment (Terraform infra + MCP server + these docs) at `github.com/EVERJUST-DEV/usesend-email`.

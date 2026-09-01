@@ -19,18 +19,6 @@ export function baseOptions(): BaseLayoutProps {
         on: 'nav',
         children: (
           <a
-            href="/docs"
-            className="hidden md:inline-flex items-center justify-center rounded-full border border-fd-border bg-fd-background px-3.5 py-1 text-[11px] font-bold tracking-wider text-fd-foreground transition-colors hover:bg-fd-accent"
-          >
-            DOCS
-          </a>
-        ),
-      },
-      {
-        type: 'custom',
-        on: 'nav',
-        children: (
-          <a
             href="https://mail.everjust.app"
             target="_blank"
             rel="noopener noreferrer"

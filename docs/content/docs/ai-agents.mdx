@@ -6,7 +6,7 @@ description: Patterns for calling useSend safely from AI agents — idempotent s
 useSend is a good fit for autonomous agents: a small REST surface, a single static Bearer token, JSON in and JSON out, an optional idempotency key for safe retries, and a structured status enum you can branch on. This page covers the patterns an agent needs to send mail without double-sending and to react to what happens afterward.
 
 <Callout type="info">
-The fastest way to give an agent email is the [useSend MCP server](/docs/mcp) — it exposes send / status / domain tools directly to the model, so you write no HTTP glue. Reach for the raw REST patterns below when you are building your own tool wrappers or working outside an MCP host.
+The fastest way to give an agent email is the [useSend MCP server](/mcp) — it exposes send / status / domain tools directly to the model, so you write no HTTP glue. Reach for the raw REST patterns below when you are building your own tool wrappers or working outside an MCP host.
 </Callout>
 
 ## Why the API is agent-friendly
@@ -18,7 +18,7 @@ The fastest way to give an agent email is the [useSend MCP server](/docs/mcp) �
 - **No rate limiting.** This self-hosted instance has rate limiting disabled, so an agent will not hit `RATE_LIMITED` (429) under normal load. Still write retries defensively.
 
 <Callout type="warn">
-SES is currently in **sandbox**. Until AWS grants production access, sends only succeed to verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@…`, `complaint@…`). An agent testing end-to-end should target `success@simulator.amazonses.com` — it accepts and "delivers" without a real inbox. See [Sending email](/docs/sending-email) for the full sandbox rules.
+SES is currently in **sandbox**. Until AWS grants production access, sends only succeed to verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@…`, `complaint@…`). An agent testing end-to-end should target `success@simulator.amazonses.com` — it accepts and "delivers" without a real inbox. See [Sending email](/sending-email) for the full sandbox rules.
 </Callout>
 
 ## Pattern 1 — Send a transactional message
@@ -133,7 +133,7 @@ switch (latest) {
 </Tab>
 </Tabs>
 
-Terminal-failure statuses (`BOUNCED`, `COMPLAINED`, `REJECTED`, `FAILED`, `SUPPRESSED`) mean the address will not accept mail — an agent should stop retrying that recipient rather than loop. Full status list is in the [API reference](/docs/api).
+Terminal-failure statuses (`BOUNCED`, `COMPLAINED`, `REJECTED`, `FAILED`, `SUPPRESSED`) mean the address will not accept mail — an agent should stop retrying that recipient rather than loop. Full status list is in the [API reference](/api).
 
 ## Pattern 4 — React to outcomes via webhooks
 
@@ -161,7 +161,7 @@ app.post("/webhooks/usesend", (req, res) => {
 });
 ```
 
-See [Webhooks](/docs/webhooks) for the full event catalog, signature scheme, and payload shapes.
+See [Webhooks](/webhooks) for the full event catalog, signature scheme, and payload shapes.
 
 ## A minimal agent tool
 
@@ -221,10 +221,10 @@ curl -sS -X POST https://mail.everjust.app/api/v1/emails \
 This documentation is published with an [`/llms.txt`](/llms.txt) index — a machine-readable map of every page, so an agent that ingests docs can discover the API surface without crawling HTML. Point your doc-reading agent at `https://mail.everjust.app/llms.txt` (docs are served alongside the dashboard).
 
 <Cards>
-  <Card title="MCP server" href="/docs/mcp">Ready-made send / status / domain tools — the least-glue path for an agent.</Card>
-  <Card title="API reference" href="/docs/api">Every endpoint, field, error code, and the full status enum.</Card>
-  <Card title="Sending email" href="/docs/sending-email">Send options, templates, attachments, scheduling, and sandbox rules.</Card>
-  <Card title="Webhooks" href="/docs/webhooks">Event types, HMAC signature verification, and retry behavior.</Card>
+  <Card title="MCP server" href="/mcp">Ready-made send / status / domain tools — the least-glue path for an agent.</Card>
+  <Card title="API reference" href="/api">Every endpoint, field, error code, and the full status enum.</Card>
+  <Card title="Sending email" href="/sending-email">Send options, templates, attachments, scheduling, and sandbox rules.</Card>
+  <Card title="Webhooks" href="/webhooks">Event types, HMAC signature verification, and retry behavior.</Card>
 </Cards>
 
 <Callout type="info">

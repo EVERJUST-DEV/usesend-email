@@ -6,7 +6,7 @@ description: How the EverJust useSend instance runs on AWS — VPC, ECS Fargate,
 This page describes how the single EverJust useSend instance is deployed on AWS. Everything below is provisioned by Terraform in the `terraform/` directory of [github.com/EVERJUST-DEV/usesend-email](https://github.com/EVERJUST-DEV/usesend-email) — the diagram and the resource list are the code, not a whiteboard sketch.
 
 <Callout type="info">
-One AWS deployment serves every product. Tenancy is logical: a **Team** is a tenant, with its own sending domains and API keys. See [Tenant isolation](/docs/tenant-isolation) for how Teams keep products apart on shared infrastructure.
+One AWS deployment serves every product. Tenancy is logical: a **Team** is a tenant, with its own sending domains and API keys. See [Tenant isolation](/tenant-isolation) for how Teams keep products apart on shared infrastructure.
 </Callout>
 
 ## Topology
@@ -100,6 +100,6 @@ Baseline infrastructure runs roughly **$65–80/month** (Fargate task, ALB, RDS,
 Every resource above is defined as Terraform in `terraform/` in the [usesend-email repo](https://github.com/EVERJUST-DEV/usesend-email). Infrastructure changes go through Terraform, not the console.
 
 <Cards>
-  <Card title="Operations" href="/docs/operations">Deploying, updating, and monitoring this instance.</Card>
-  <Card title="Tenant isolation" href="/docs/tenant-isolation">How Teams keep products separated on shared infrastructure.</Card>
+  <Card title="Operations" href="/operations">Deploying, updating, and monitoring this instance.</Card>
+  <Card title="Tenant isolation" href="/tenant-isolation">How Teams keep products separated on shared infrastructure.</Card>
 </Cards>

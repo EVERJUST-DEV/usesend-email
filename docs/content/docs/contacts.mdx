@@ -3,10 +3,10 @@ title: Contacts & Contact Books
 description: Manage audience lists (contact books) and their contacts for broadcast campaigns on self-hosted useSend.
 ---
 
-Contact books are useSend's audience feature: named lists of contacts that [campaigns](/docs/campaigns) send to. A contact book holds many contacts, each with an email, optional name, subscription state, and custom `properties`. Double opt-in is configurable per book.
+Contact books are useSend's audience feature: named lists of contacts that [campaigns](/api) send to. A contact book holds many contacts, each with an email, optional name, subscription state, and custom `properties`. Double opt-in is configurable per book.
 
 <Callout type="info">
-Contacts are for **marketing/broadcast** sending only. Transactional sends via [`POST /v1/emails`](/docs/emails) take a raw `to` address and do **not** require a contact or contact book. Reach for this API only when you are building lists for [campaigns](/docs/campaigns).
+Contacts are for **marketing/broadcast** sending only. Transactional sends via [`POST /v1/emails`](/sending-email) take a raw `to` address and do **not** require a contact or contact book. Reach for this API only when you are building lists for [campaigns](/api).
 </Callout>
 
 All requests use the self-hosted base URL `https://mail.everjust.app/api/v1` and Bearer auth. Rate limiting is disabled on this instance.
@@ -339,7 +339,7 @@ usesend.contacts.bulk_delete("cb_123", {
 When `doubleOptInEnabled` is true on a contact book, useSend sends a confirmation email to newly added contacts using the book's `doubleOptInFrom`, `doubleOptInSubject`, and `doubleOptInContent`. A contact remains `subscribed: false` until they confirm.
 
 <Callout type="info">
-The double opt-in email is a normal send through Amazon SES. While this instance's SES is in **sandbox**, confirmation emails only reach verified addresses or the SES mailbox simulator — so opt-in flows for arbitrary recipients will not complete until AWS grants production access. See [Sending email](/docs/emails) for the sandbox details.
+The double opt-in email is a normal send through Amazon SES. While this instance's SES is in **sandbox**, confirmation emails only reach verified addresses or the SES mailbox simulator — so opt-in flows for arbitrary recipients will not complete until AWS grants production access. See [Sending email](/sending-email) for the sandbox details.
 </Callout>
 
 ## Errors
@@ -355,7 +355,7 @@ Common codes for this API: `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `FORBIDDEN
 ## Next steps
 
 <Cards>
-  <Card title="Campaigns" href="/docs/campaigns">Send a broadcast to a contact book.</Card>
-  <Card title="Sending email" href="/docs/emails">Transactional sends — no contacts required.</Card>
-  <Card title="Webhooks" href="/docs/webhooks">Subscribe to contact.created / updated / deleted events.</Card>
+  <Card title="Campaigns" href="/api">Send a broadcast to a contact book.</Card>
+  <Card title="Sending email" href="/sending-email">Transactional sends — no contacts required.</Card>
+  <Card title="Webhooks" href="/webhooks">Subscribe to contact.created / updated / deleted events.</Card>
 </Cards>
