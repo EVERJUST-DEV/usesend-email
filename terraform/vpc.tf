@@ -46,26 +46,14 @@ resource "aws_subnet" "private" {
   tags              = { Name = "${var.project_name}-private-${local.azs[count.index]}", Tier = "private" }
 }
 
-# ---- NAT --------------------------------------------------------------------
-# Single NAT gateway by default (cost). Set var.nat_per_az = true for HA.
-locals {
-  nat_count = var.nat_per_az ? 2 : 1
-}
-
-resource "aws_eip" "nat" {
-  count      = local.nat_count
-  domain     = "vpc"
-  tags       = { Name = "${var.project_name}-nat-${count.index}" }
-  depends_on = [aws_internet_gateway.main]
-}
-
-resource "aws_nat_gateway" "main" {
-  count         = local.nat_count
-  allocation_id = aws_eip.nat[count.index].id
-  subnet_id     = aws_subnet.public[count.index].id
-  tags          = { Name = "${var.project_name}-nat-${count.index}" }
-  depends_on    = [aws_internet_gateway.main]
-}
+# ---- NAT (intentionally omitted) --------------------------------------------
+# This AWS account is at its Elastic IP cap (~20, all associated to other
+# projects), so a NAT gateway can't allocate an EIP. Instead the Fargate tasks
+# run in PUBLIC subnets with a public IP for egress (inbound stays locked to the
+# ALB via security group; see ecs.tf). RDS/Redis remain in private subnets and
+# need only local VPC routing. Bonus: saves the ~$32/mo NAT gateway cost.
+# (var.nat_per_az is retained but unused; re-introduce NAT here if you later
+# raise the EIP quota and want private egress.)
 
 # ---- Route tables -----------------------------------------------------------
 resource "aws_route_table" "public" {
@@ -86,10 +74,7 @@ resource "aws_route_table_association" "public" {
 resource "aws_route_table" "private" {
   count  = 2
   vpc_id = aws_vpc.main.id
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[var.nat_per_az ? count.index : 0].id
-  }
+  # Local VPC routing only — RDS/Redis need no internet egress.
   tags = { Name = "${var.project_name}-private-rt-${count.index}" }
 }
 

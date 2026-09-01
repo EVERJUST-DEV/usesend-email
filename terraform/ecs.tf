@@ -104,9 +104,12 @@ resource "aws_ecs_service" "app" {
   health_check_grace_period_seconds = 300
 
   network_configuration {
-    subnets          = aws_subnet.private[*].id
+    # Public subnets + public IP for egress (Docker Hub image pull, SES API)
+    # because this account is at its EIP cap and has no NAT gateway. Inbound is
+    # still restricted to the ALB by the ecs security group.
+    subnets          = aws_subnet.public[*].id
     security_groups  = [aws_security_group.ecs.id]
-    assign_public_ip = false
+    assign_public_ip = true
   }
 
   load_balancer {
