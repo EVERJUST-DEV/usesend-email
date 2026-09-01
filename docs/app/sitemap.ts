@@ -1,6 +1,9 @@
 import { MetadataRoute } from 'next';
 import { source } from '@/lib/source';
 
+// Required for `output: export` — evaluate the sitemap once at build time.
+export const dynamic = 'force-static';
+
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl =
     process.env.NEXT_PUBLIC_SITE_URL || 'https://everjust-dev.github.io/usesend-email';
