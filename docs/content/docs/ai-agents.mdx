@@ -1,0 +1,232 @@
+---
+title: useSend for AI agents
+description: Patterns for calling useSend safely from AI agents — idempotent sends, delivery checks, webhook-driven reactions, and the MCP server.
+---
+
+useSend is a good fit for autonomous agents: a small REST surface, a single static Bearer token, JSON in and JSON out, an optional idempotency key for safe retries, and a structured status enum you can branch on. This page covers the patterns an agent needs to send mail without double-sending and to react to what happens afterward.
+
+<Callout type="info">
+The fastest way to give an agent email is the [useSend MCP server](/docs/mcp) — it exposes send / status / domain tools directly to the model, so you write no HTTP glue. Reach for the raw REST patterns below when you are building your own tool wrappers or working outside an MCP host.
+</Callout>
+
+## Why the API is agent-friendly
+
+- **One base URL, one credential.** Everything is under `https://mail.everjust.app/api/v1` with `Authorization: Bearer us_xxx`. No token refresh, no OAuth dance, no per-request signing.
+- **JSON request and response.** Send returns `{"emailId":"..."}`; errors return a stable envelope `{"error":{"code":"...","message":"..."}}` with codes like `BAD_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`. Easy to parse and branch on.
+- **Idempotent sends.** An optional `Idempotency-Key` header makes a retried send return the original result instead of sending twice — the single most important property for a tool an agent may call more than once.
+- **Structured status.** Delivery state is a fixed enum (`QUEUED`, `SENT`, `DELIVERED`, `BOUNCED`, `COMPLAINED`, `FAILED`, …), so a model can reason about outcomes without scraping prose.
+- **No rate limiting.** This self-hosted instance has rate limiting disabled, so an agent will not hit `RATE_LIMITED` (429) under normal load. Still write retries defensively.
+
+<Callout type="warn">
+SES is currently in **sandbox**. Until AWS grants production access, sends only succeed to verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@…`, `complaint@…`). An agent testing end-to-end should target `success@simulator.amazonses.com` — it accepts and "delivers" without a real inbox. See [Sending email](/docs/sending-email) for the full sandbox rules.
+</Callout>
+
+## Pattern 1 — Send a transactional message
+
+The core action. `to` and `from` are required; you need `subject` (or a `templateId`) and `text` or `html`.
+
+<Tabs items={['cURL','Node']}>
+<Tab value="cURL">
+```bash
+curl -sS -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Your report is ready",
+    "text": "The nightly report finished. Reply if anything looks off."
+  }'
+# -> {"emailId":"clz8k2p9x0001..."}
+```
+</Tab>
+<Tab value="Node">
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend("us_xxx", "https://mail.everjust.app/api/v1");
+
+const { data, error } = await usesend.emails.send({
+  from: "EverJust <hello@send.everjust.app>",
+  to: "success@simulator.amazonses.com",
+  subject: "Your report is ready",
+  text: "The nightly report finished. Reply if anything looks off.",
+});
+
+if (error) {
+  // structured: error.code, error.message
+  throw new Error(`send failed: ${error.code} ${error.message}`);
+}
+console.log(data.emailId);
+```
+</Tab>
+</Tabs>
+
+## Pattern 2 — Idempotency for safe retries
+
+Agents retry: a step re-runs after a timeout, a workflow resumes, a tool call is attempted twice. Attach an `Idempotency-Key` you derive deterministically from the unit of work (an order id, a task id, a hash of the payload). A repeated call with the same key returns the original `emailId` instead of sending a second email.
+
+<Tabs items={['cURL','Node']}>
+<Tab value="cURL">
+```bash
+curl -sS -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-4821-confirmation" \
+  -d '{
+    "from": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Order 4821 confirmed",
+    "html": "<p>We are on it.</p>"
+  }'
+```
+</Tab>
+<Tab value="Node">
+```ts
+const key = `order-${order.id}-confirmation`; // deterministic per task
+
+const { data, error } = await usesend.emails.send(
+  {
+    from: "EverJust <hello@send.everjust.app>",
+    to: order.email,
+    subject: `Order ${order.id} confirmed`,
+    html: "<p>We are on it.</p>",
+  },
+  { idempotencyKey: key }
+);
+```
+</Tab>
+</Tabs>
+
+<Callout type="info">
+The same `Idempotency-Key` header applies to `POST /v1/emails/batch`. Choose keys tied to the work, not the wall clock — `task-1234`, not a timestamp — so a retry produces the same key.
+</Callout>
+
+## Pattern 3 — Check delivery by id
+
+After sending, poll the email to see how far it got. `GET /v1/emails/{emailId}` returns the record plus an `emailEvents` array; the last event's `status` is the current state.
+
+<Tabs items={['cURL','Node']}>
+<Tab value="cURL">
+```bash
+curl -sS https://mail.everjust.app/api/v1/emails/clz8k2p9x0001 \
+  -H "Authorization: Bearer us_xxx"
+```
+</Tab>
+<Tab value="Node">
+```ts
+const email = await usesend.emails.get(emailId);
+const latest = email.emailEvents.at(-1)?.status;
+
+switch (latest) {
+  case "DELIVERED":
+    return "ok";
+  case "BOUNCED":
+  case "COMPLAINED":
+  case "REJECTED":
+  case "FAILED":
+    return "give-up"; // do not retry the same address
+  default:
+    return "pending"; // QUEUED / SENT — poll again shortly
+}
+```
+</Tab>
+</Tabs>
+
+Terminal-failure statuses (`BOUNCED`, `COMPLAINED`, `REJECTED`, `FAILED`, `SUPPRESSED`) mean the address will not accept mail — an agent should stop retrying that recipient rather than loop. Full status list is in the [API reference](/docs/api).
+
+## Pattern 4 — React to outcomes via webhooks
+
+Polling is fine for a one-off send, but for fire-and-continue workflows, let useSend push the outcome to you. Configure a webhook endpoint (dashboard only) and handle events like `email.delivered`, `email.bounced`, `email.complained`, `email.opened`, and `email.clicked`. Each request is HMAC-SHA256 signed — verify it on the **raw** body before acting.
+
+```ts
+// Express-style handler; needs the raw body, not the parsed one
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend("us_xxx", "https://mail.everjust.app/api/v1");
+const wh = usesend.webhooks("whsec_...");
+
+app.post("/webhooks/usesend", (req, res) => {
+  let event;
+  try {
+    event = wh.constructEvent(req.rawBody, { headers: req.headers });
+  } catch {
+    return res.status(400).end(); // bad signature
+  }
+
+  if (event.type === "email.bounced") {
+    suppress(event.data); // event.data.bounce = { type, subType, message }
+  }
+  res.status(200).end(); // must 2xx within 10s, else retried up to 6x
+});
+```
+
+See [Webhooks](/docs/webhooks) for the full event catalog, signature scheme, and payload shapes.
+
+## A minimal agent tool
+
+If you are wiring useSend into an agent framework as a callable tool, keep the surface tiny: one function that sends and returns the id, with the idempotency key threaded through so the framework's retry logic is safe.
+
+<Tabs items={['Node','cURL']}>
+<Tab value="Node">
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend(
+  process.env.USESEND_API_KEY!, // us_xxx
+  "https://mail.everjust.app/api/v1"
+);
+
+/** Tool: send_email — returns the useSend email id. */
+export async function sendEmail(args: {
+  to: string;
+  subject: string;
+  body: string;
+  idempotencyKey: string; // required: pass a stable per-task key
+}) {
+  const { data, error } = await usesend.emails.send(
+    {
+      from: "EverJust <hello@send.everjust.app>",
+      to: args.to,
+      subject: args.subject,
+      text: args.body,
+    },
+    { idempotencyKey: args.idempotencyKey }
+  );
+  if (error) return { ok: false, code: error.code, message: error.message };
+  return { ok: true, emailId: data.emailId };
+}
+```
+</Tab>
+<Tab value="cURL">
+```bash
+# The same tool as a shell one-liner an agent can exec.
+# $KEY is the deterministic idempotency key for this task.
+curl -sS -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $KEY" \
+  -d "{
+    \"from\": \"EverJust <hello@send.everjust.app>\",
+    \"to\": \"$TO\",
+    \"subject\": \"$SUBJECT\",
+    \"text\": \"$BODY\"
+  }"
+```
+</Tab>
+</Tabs>
+
+## For agents that read docs
+
+This documentation is published with an [`/llms.txt`](/llms.txt) index — a machine-readable map of every page, so an agent that ingests docs can discover the API surface without crawling HTML. Point your doc-reading agent at `https://mail.everjust.app/llms.txt` (docs are served alongside the dashboard).
+
+<Cards>
+  <Card title="MCP server" href="/docs/mcp">Ready-made send / status / domain tools — the least-glue path for an agent.</Card>
+  <Card title="API reference" href="/docs/api">Every endpoint, field, error code, and the full status enum.</Card>
+  <Card title="Sending email" href="/docs/sending-email">Send options, templates, attachments, scheduling, and sandbox rules.</Card>
+  <Card title="Webhooks" href="/docs/webhooks">Event types, HMAC signature verification, and retry behavior.</Card>
+</Cards>
+
+<Callout type="info">
+One API key belongs to one Team (tenant), which maps to one EverJust product. Give each product its own key — never share `us_` keys across products. The pre-provisioned Team is **EverJust**, sending from the verified domain **send.everjust.app**.
+</Callout>

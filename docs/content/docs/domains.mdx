@@ -1,0 +1,371 @@
+---
+title: Domains
+description: Create, list, verify, and delete sending domains through the useSend REST API, and read the Domain object and its DNS records.
+---
+
+Sending domains are the addresses your product sends *from*. Each domain belongs to a Team (tenant) and must complete DNS-based verification — DKIM, SPF, and MAIL FROM — before it can send. This page documents the REST endpoints for managing domains programmatically.
+
+<Callout type="info">
+The EverJust Team already has a verified sending domain, **`send.everjust.app`** (`status: SUCCESS`). You only need these endpoints when adding a new domain. To send mail from an existing domain, see [Send an email](/docs/emails).
+</Callout>
+
+## Base URL and auth
+
+All requests go to the self-hosted instance and use HTTP Bearer auth.
+
+```http
+POST /v1/domains HTTP/1.1
+Host: mail.everjust.app
+Authorization: Bearer us_xxx
+Content-Type: application/json
+```
+
+The full base URL is `https://mail.everjust.app/api/v1`. Rate limiting is **disabled** on this self-hosted instance, so no `429` throttling applies to domain management.
+
+<Callout type="warn">
+The domain path parameter `{id}` is a **number** (e.g. `/v1/domains/3`), not the domain name and not a `us_`-style string. This differs from contact books and campaigns, whose IDs are strings.
+</Callout>
+
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/v1/domains` | Create a domain |
+| `GET` | `/v1/domains` | List all domains |
+| `GET` | `/v1/domains/{id}` | Retrieve one domain |
+| `PUT` | `/v1/domains/{id}/verify` | Trigger a verification check |
+| `DELETE` | `/v1/domains/{id}` | Delete a domain |
+
+## Create a domain
+
+`POST /v1/domains`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | Yes | The domain (or subdomain) to send from, e.g. `send.everjust.app`. |
+| `region` | string | Yes | AWS SES region, e.g. `us-east-1`. **Must match the instance's SES settings.** |
+
+<Callout type="warn">
+`region` must match the region SES is configured for on this deployment. A mismatched region produces a domain that can never verify. Use a dedicated sending subdomain (like `send.everjust.app`) rather than your root domain to isolate email DNS and reputation.
+</Callout>
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/domains \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "send.everjust.app",
+    "region": "us-east-1"
+  }'
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend("us_xxx", "https://mail.everjust.app/api/v1");
+
+const { data, error } = await usesend.domains.create({
+  name: "send.everjust.app",
+  region: "us-east-1",
+});
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+from usesend import UseSend
+
+usesend = UseSend("us_xxx", "https://mail.everjust.app/api/v1")
+
+domain = usesend.domains.create({
+    "name": "send.everjust.app",
+    "region": "us-east-1",
+})
+```
+
+</Tab>
+</Tabs>
+
+The response is a full [Domain object](#the-domain-object), including the `dnsRecords` array you must publish at your DNS provider.
+
+## List domains
+
+`GET /v1/domains`
+
+Returns an array of every Domain owned by the Team. No query parameters.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl https://mail.everjust.app/api/v1/domains \
+  -H "Authorization: Bearer us_xxx"
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+const { data, error } = await usesend.domains.list();
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+domains = usesend.domains.list()
+```
+
+</Tab>
+</Tabs>
+
+## Retrieve a domain
+
+`GET /v1/domains/{id}`
+
+Fetch a single Domain by its numeric `id`. Poll this endpoint (or [verify](#verify-a-domain)) to watch the `status` and `dnsRecords[].status` fields change as DNS propagates.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl https://mail.everjust.app/api/v1/domains/3 \
+  -H "Authorization: Bearer us_xxx"
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+const { data, error } = await usesend.domains.get(3);
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+domain = usesend.domains.get(3)
+```
+
+</Tab>
+</Tabs>
+
+## Verify a domain
+
+`PUT /v1/domains/{id}/verify`
+
+Triggers a re-check of the domain's DNS records against SES. Send no body. Call this after you have published the DNS records, and again as needed until `status` reaches `SUCCESS`.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X PUT https://mail.everjust.app/api/v1/domains/3/verify \
+  -H "Authorization: Bearer us_xxx"
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+const { data, error } = await usesend.domains.verify(3);
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+result = usesend.domains.verify(3)
+```
+
+</Tab>
+</Tabs>
+
+```json
+{ "message": "Domain verification started" }
+```
+
+<Callout type="info">
+Verification is not instantaneous. DKIM (and SPF/MAIL FROM) validation depends on **DNS propagation**, which can take anywhere from a few minutes to 48 hours depending on your provider and TTLs. `verify` only tells SES to look again — it cannot speed up propagation. Poll [GET `/v1/domains/{id}`](#retrieve-a-domain) to track progress.
+</Callout>
+
+## Delete a domain
+
+`DELETE /v1/domains/{id}`
+
+Removes the domain from the Team. Emails already sent are unaffected, but you can no longer send from the domain.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X DELETE https://mail.everjust.app/api/v1/domains/3 \
+  -H "Authorization: Bearer us_xxx"
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+const { data, error } = await usesend.domains.delete(3);
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+result = usesend.domains.delete(3)
+```
+
+</Tab>
+</Tabs>
+
+```json
+{ "id": 3, "success": true, "message": "Domain deleted" }
+```
+
+## The Domain object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | number | Numeric identifier used in path parameters. |
+| `name` | string | The domain / subdomain, e.g. `send.everjust.app`. |
+| `teamId` | number | The owning Team (tenant). |
+| `status` | enum | Overall verification state: `NOT_STARTED`, `PENDING`, `SUCCESS`, `FAILED`, `TEMPORARY_FAILURE`. |
+| `region` | string | AWS SES region for the domain. |
+| `clickTracking` | boolean | Whether click tracking is enabled (dashboard-only toggle). |
+| `openTracking` | boolean | Whether open tracking is enabled (dashboard-only toggle). |
+| `publicKey` | string | The DKIM public key associated with the domain. |
+| `dkimStatus` | string | DKIM verification state. |
+| `spfDetails` | string | SPF configuration / verification detail. |
+| `dmarcAdded` | boolean | Whether a DMARC record has been detected. |
+| `dnsRecords` | array | The DNS records to publish — see below. |
+
+### The `dnsRecords` array
+
+Each entry describes one DNS record you must create at your DNS provider. Publish all of them, then run [verify](#verify-a-domain).
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `type` | enum | `MX` or `TXT`. |
+| `name` | string | The record host / name. |
+| `value` | string | The record value to publish. |
+| `ttl` | string | Suggested time-to-live. |
+| `priority` | number | Priority — relevant for `MX` records. |
+| `status` | string | Per-record verification state (updates as DNS propagates). |
+| `recommended` | boolean | Whether the record is recommended (e.g. DMARC) versus strictly required. |
+
+```json
+{
+  "id": 3,
+  "name": "send.everjust.app",
+  "teamId": 1,
+  "status": "PENDING",
+  "region": "us-east-1",
+  "clickTracking": false,
+  "openTracking": false,
+  "dkimStatus": "PENDING",
+  "spfDetails": "PENDING",
+  "dmarcAdded": false,
+  "dnsRecords": [
+    {
+      "type": "TXT",
+      "name": "resend._domainkey.send.everjust.app",
+      "value": "p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQ...",
+      "ttl": "Auto",
+      "priority": null,
+      "status": "PENDING",
+      "recommended": false
+    },
+    {
+      "type": "MX",
+      "name": "send.everjust.app",
+      "value": "feedback-smtp.us-east-1.amazonses.com",
+      "ttl": "Auto",
+      "priority": 10,
+      "status": "PENDING",
+      "recommended": false
+    },
+    {
+      "type": "TXT",
+      "name": "send.everjust.app",
+      "value": "v=spf1 include:amazonses.com ~all",
+      "ttl": "Auto",
+      "priority": null,
+      "status": "PENDING",
+      "recommended": false
+    }
+  ]
+}
+```
+
+## Verification lifecycle
+
+A new domain moves through these states:
+
+<Steps>
+
+<Step>
+**`NOT_STARTED`** — The domain exists but no verification has been attempted. This is the state immediately after `POST /v1/domains` before DNS records are checked.
+</Step>
+
+<Step>
+**Publish the DNS records** — Copy every entry from `dnsRecords` into your DNS provider exactly as given (name, type, value, and priority for `MX`).
+</Step>
+
+<Step>
+**`PENDING`** — Verification is in progress. SES is waiting for the DKIM, SPF, and MAIL FROM (MX) records to become visible. This is where **DNS propagation** delay lands — records can take minutes to hours (up to ~48h) to be seen. Call `PUT /v1/domains/{id}/verify` to re-check and poll `GET /v1/domains/{id}`.
+</Step>
+
+<Step>
+**`SUCCESS`** — All required records verified. The domain can now send mail.
+</Step>
+
+</Steps>
+
+`FAILED` means verification could not complete (usually a missing or incorrect record); fix the DNS entry and call `verify` again. `TEMPORARY_FAILURE` indicates a transient issue — retry verification later.
+
+<Callout type="warn">
+This deployment's SES is currently in **sandbox** mode. A verified domain is required to send, but even from a verified domain you can only send to verified recipient addresses or the [SES mailbox simulator](https://docs.aws.amazon.com/ses/latest/dg/send-an-email-from-console.html) (`success@simulator.amazonses.com`, `bounce@`, `complaint@`) until AWS grants production access (requested, pending). Verifying a *sending* domain does not lift the sandbox recipient restriction.
+</Callout>
+
+## Open and click tracking
+
+The `openTracking` and `clickTracking` fields appear on the Domain object as read-only booleans over the REST API. There is **no public REST endpoint to update tracking** — toggle these in the useSend dashboard at [mail.everjust.app](https://mail.everjust.app) under the domain's settings.
+
+<Callout type="info">
+Because there is no `PUT`/`PATCH` to change tracking, treat these fields as reportable state only. If you need tracking changed for a domain, do it once in the dashboard.
+</Callout>
+
+## Errors
+
+Errors use the standard envelope:
+
+```json
+{ "error": { "code": "NOT_FOUND", "message": "Domain not found" } }
+```
+
+| Code | HTTP | Common cause |
+| --- | --- | --- |
+| `BAD_REQUEST` | 400 | Missing `name`/`region`, or a `region` that isn't a valid SES region. |
+| `UNAUTHORIZED` | 401 | Missing or invalid `Authorization: Bearer us_xxx`. |
+| `FORBIDDEN` | 403 | The API key's Team does not own this domain. |
+| `NOT_FOUND` | 404 | No domain with the given numeric `id`. |
+| `NOT_UNIQUE` | 409 | A domain with that name already exists for the Team. |
+| `INTERNAL_SERVER_ERROR` | 500 | Unexpected server error. |
+
+<Cards>
+  <Card title="Send an email" href="/docs/emails">
+    Use a verified domain in the `from` address to send transactional mail.
+  </Card>
+  <Card title="Analytics" href="/docs/analytics">
+    Reputation and delivery metrics, filterable by `domainId`.
+  </Card>
+</Cards>

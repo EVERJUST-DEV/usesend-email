@@ -1,0 +1,239 @@
+---
+title: Migrate from Resend
+description: Move your product from Resend to self-hosted useSend with a near-identical per-email API and no per-domain fees.
+---
+
+If your product already sends transactional email through Resend, moving to useSend is mostly a change of base URL, API key, and SDK import. The mental model is the same: one HTTP call per email, with `to`, `from`, `subject`, and `html`/`text`. The difference is that useSend runs on **your** AWS SES deployment — one flat platform, no per-domain pricing, and full control over sending domains and DNS.
+
+<Callout type="info">
+useSend is self-hosted at `https://mail.everjust.app`. Rate limiting is **disabled**, so you can dual-send during migration without throttling. SES is currently in **sandbox** — until AWS grants production access you can only send to verified addresses or the [SES mailbox simulator](https://docs.aws.amazon.com/ses/latest/dg/send-email-simulator.html) (`success@simulator.amazonses.com`, `bounce@`, `complaint@`).
+</Callout>
+
+## What maps to what
+
+| Concept | Resend | useSend |
+| --- | --- | --- |
+| API base URL | `https://api.resend.com` | `https://mail.everjust.app/api/v1` |
+| Auth header | `Authorization: Bearer re_xxx` | `Authorization: Bearer us_xxx` |
+| Send one email | `POST /emails` | `POST /v1/emails` |
+| Send batch | `POST /emails/batch` | `POST /v1/emails/batch` |
+| Node SDK | `resend` (`import { Resend }`) | `usesend-js` (`import { UseSend }`) |
+| Python SDK | `resend` | `usesend` |
+| React Email | Supported | Supported (`react` payload field, Node SDK) |
+| Idempotency | `Idempotency-Key` header | `Idempotency-Key` header |
+| Tenancy | Account | Team (one Team per product) |
+| Domains / DNS | Managed by Resend | You manage them — see [Onboard a product](/docs/onboard-a-product) |
+
+The send response shape differs slightly: Resend returns `{ id }`, useSend returns `{ emailId }`. Through the SDK both are wrapped as `{ data, error }`.
+
+## Before / after
+
+Same payload, different client. Note `from` uses the verified `send.everjust.app` domain.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+Resend:
+
+```bash
+curl -X POST https://api.resend.com/emails \
+  -H "Authorization: Bearer re_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Welcome",
+    "html": "<h1>Hello</h1>"
+  }'
+```
+
+useSend:
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Welcome",
+    "html": "<h1>Hello</h1>"
+  }'
+```
+
+</Tab>
+<Tab value="Node">
+
+Resend:
+
+```ts
+import { Resend } from "resend";
+
+const resend = new Resend("re_xxx");
+
+const { data, error } = await resend.emails.send({
+  from: "EverJust <hello@send.everjust.app>",
+  to: "success@simulator.amazonses.com",
+  subject: "Welcome",
+  html: "<h1>Hello</h1>",
+});
+```
+
+useSend:
+
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend("us_xxx", "https://mail.everjust.app/api/v1");
+
+const { data, error } = await usesend.emails.send({
+  from: "EverJust <hello@send.everjust.app>",
+  to: "success@simulator.amazonses.com",
+  subject: "Welcome",
+  html: "<h1>Hello</h1>",
+});
+// data?.emailId
+```
+
+</Tab>
+<Tab value="Python">
+
+Resend:
+
+```python
+import resend
+
+resend.api_key = "re_xxx"
+
+resend.Emails.send({
+    "from": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Welcome",
+    "html": "<h1>Hello</h1>",
+})
+```
+
+useSend:
+
+```python
+from usesend import UseSend
+
+client = UseSend("us_xxx", "https://mail.everjust.app/api/v1")
+
+client.emails.send({
+    "from_": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Welcome",
+    "html": "<h1>Hello</h1>",
+})
+```
+
+</Tab>
+</Tabs>
+
+<Callout type="info">
+In the Python SDK, `from` is a reserved keyword, so the field is passed as `from_`.
+</Callout>
+
+### React Email
+
+Both platforms accept a React Email component through the Node SDK's `react` field, so your existing templates carry over unchanged:
+
+```ts
+import { UseSend } from "usesend-js";
+import { WelcomeEmail } from "./emails/welcome";
+
+const usesend = new UseSend("us_xxx", "https://mail.everjust.app/api/v1");
+
+await usesend.emails.send({
+  from: "EverJust <hello@send.everjust.app>",
+  to: "user@example.com",
+  subject: "Welcome",
+  react: <WelcomeEmail name="Ada" />,
+});
+```
+
+## Differences to account for
+
+Most Resend payloads work as-is, but a few fields differ. Audit your send calls for these:
+
+<Accordions>
+<Accordion title="No 'tags' field">
+useSend does **not** support Resend's `tags` array. Remove it from your payloads. If you need to attach metadata to a message, use custom `headers` (a `Record<string,string>`) instead, and rely on webhooks/analytics for reporting.
+</Accordion>
+<Accordion title="Threading uses inReplyToId">
+Resend threads replies with the `Message-ID` / `In-Reply-To` headers. useSend exposes a dedicated `inReplyToId` field (the `emailId` of the message you are replying to). Set it instead of hand-rolling threading headers.
+
+```ts
+await usesend.emails.send({
+  from: "EverJust <hello@send.everjust.app>",
+  to: "user@example.com",
+  subject: "Re: Welcome",
+  html: "<p>Following up.</p>",
+  inReplyToId: "prev_email_id",
+});
+```
+</Accordion>
+<Accordion title="Attachments are { filename, content }">
+useSend attachments take only `filename` and `content` (base64), with a **maximum of 10** per email. There is no `path` and no `contentType` field — read and base64-encode the file yourself.
+
+```ts
+await usesend.emails.send({
+  from: "EverJust <hello@send.everjust.app>",
+  to: "user@example.com",
+  subject: "Your invoice",
+  html: "<p>Attached.</p>",
+  attachments: [
+    { filename: "invoice.pdf", content: base64Pdf },
+  ],
+});
+```
+</Accordion>
+<Accordion title="Idempotency">
+Pass an `Idempotency-Key` header on `POST /v1/emails` and `POST /v1/emails/batch` to safely retry. Through the Node SDK:
+
+```ts
+await usesend.emails.send(payload, { idempotencyKey: "order-4821-welcome" });
+```
+</Accordion>
+<Accordion title="You own the sending domains and DNS">
+Resend provisions and tracks your domain records for you. On useSend, sending domains live in your Team and you publish the DKIM/SPF/DMARC/MAIL FROM records yourself. `send.everjust.app` is already verified; adding another domain is covered in [Onboard a product](/docs/onboard-a-product).
+</Accordion>
+</Accordions>
+
+## Phased cutover
+
+Cut over gradually rather than flipping everything at once. Because rate limiting is off, you can run both providers in parallel with no throttling risk.
+
+<Steps>
+<Step>
+**Provision the Team and domain.** Confirm your product has a useSend Team, a verified sending domain, and a `us_` API key. For a brand-new product domain, follow [Onboard a product](/docs/onboard-a-product) and wait for DKIM/SPF/DMARC to verify.
+</Step>
+<Step>
+**Dual-send / shadow.** Wrap your send call so it fires through useSend in addition to (or as a percentage split from) Resend. Log the returned `emailId` and any `error`. While SES is in sandbox, point the shadow traffic at the SES simulator addresses so you exercise the path without needing production access.
+</Step>
+<Step>
+**Watch deliverability.** Monitor useSend's analytics — [`GET /v1/analytics/email-time-series`](/docs/analytics) for sent/delivered/bounced trends and `GET /v1/analytics/reputation-metrics` for bounce and complaint rates. Wire up [webhooks](/docs/webhooks) (`email.delivered`, `email.bounced`, `email.complained`) so failures surface in real time. Do not proceed until delivered rates match your Resend baseline.
+</Step>
+<Step>
+**Get SES production access, then flip.** Once AWS grants production access, useSend can send to any recipient. Move real traffic over — shift the percentage split to 100% useSend, keeping Resend as a fallback for one more cycle.
+</Step>
+<Step>
+**Flip DNS and retire Resend.** After the DNS for your sending domain points at the useSend/SES records and delivery is stable, remove the Resend send path from your code and decommission the Resend account. Keep its logs until you're confident nothing depends on it.
+</Step>
+</Steps>
+
+<Callout type="warn">
+Don't remove the Resend DNS records until your useSend domain shows `status: SUCCESS` and you've confirmed live delivery. Overlapping SPF/DKIM records during the transition are fine.
+</Callout>
+
+## SMTP relay for apps that only speak SMTP
+
+If a product can't easily swap HTTP clients — or was pointed at Resend's SMTP endpoint rather than its API — useSend offers an **SMTP relay** as a drop-in. Point the app at the useSend SMTP host with the `us_` API key as the password and no code change is needed. See [SMTP relay](/docs/smtp) for host, port, and credentials.
+
+<Cards>
+<Card title="Onboard a product" href="/docs/onboard-a-product">Create a Team, add a sending domain, and publish DNS.</Card>
+<Card title="SMTP relay" href="/docs/smtp">Drop-in SMTP for apps that don't use the HTTP API.</Card>
+<Card title="Webhooks" href="/docs/webhooks">Track delivery, bounces, and complaints in real time.</Card>
+<Card title="Analytics" href="/docs/analytics">Time-series and reputation metrics for deliverability.</Card>
+</Cards>

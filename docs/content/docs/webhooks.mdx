@@ -1,0 +1,403 @@
+---
+title: Webhooks
+description: Receive signed, real-time delivery events from useSend at your own HTTPS endpoint.
+---
+
+Webhooks let useSend push events to your application as they happen — email delivered, bounced, opened, a contact created, a domain verified — instead of you polling the API. useSend delivers each event as a signed HTTP `POST` to an endpoint you host.
+
+<Callout type="info">
+Webhook endpoints are **created and managed in the dashboard** ([https://mail.everjust.app](https://mail.everjust.app)), not through the public REST API. There is no `POST /v1/webhooks` endpoint — webhook CRUD is dashboard/tRPC only. Each endpoint belongs to your Team (tenant) and is issued a signing secret starting with `whsec_`.
+</Callout>
+
+## Setup
+
+<Steps>
+<Step>
+In the dashboard, open your **EverJust** Team → **Webhooks**, and add an endpoint URL (must be publicly reachable HTTPS, e.g. `https://app.everjust.app/webhooks/usesend`).
+</Step>
+<Step>
+Select which event types the endpoint should receive.
+</Step>
+<Step>
+Copy the signing secret (`whsec_…`). Store it as a server-side secret — you need it to verify signatures. Treat it like an API key; never expose it client-side.
+</Step>
+<Step>
+Use the dashboard's **Send test** action to deliver a `webhook.test` event and confirm your endpoint returns `2xx`.
+</Step>
+</Steps>
+
+## Event types
+
+<Accordions>
+<Accordion title="Email events">
+| Type | When it fires |
+| --- | --- |
+| `email.queued` | Accepted and queued for sending. |
+| `email.sent` | Handed off to Amazon SES. |
+| `email.delivery_delayed` | SES reported a temporary delivery delay. |
+| `email.delivered` | SES confirmed delivery to the recipient's mail server. |
+| `email.bounced` | Hard or soft bounce. Adds a `bounce` object. |
+| `email.rejected` | Rejected by SES before sending. |
+| `email.rendering_failure` | Template rendering failed (bad/missing `variables`). |
+| `email.complained` | Recipient marked the message as spam. |
+| `email.failed` | Send failed for another reason. |
+| `email.cancelled` | A scheduled email was cancelled before send. |
+| `email.suppressed` | Recipient was on the suppression list; send skipped. Adds a `suppression` object. |
+| `email.opened` | Recipient opened the message (open tracking). Adds an `open` object. |
+| `email.clicked` | Recipient clicked a tracked link (click tracking). Adds a `click` object. |
+
+These map to the email status enum: `SCHEDULED`, `QUEUED`, `SENT`, `DELIVERY_DELAYED`, `BOUNCED`, `REJECTED`, `RENDERING_FAILURE`, `DELIVERED`, `OPENED`, `CLICKED`, `COMPLAINED`, `FAILED`, `CANCELLED`, `SUPPRESSED`.
+</Accordion>
+<Accordion title="Contact events">
+| Type | When it fires |
+| --- | --- |
+| `contact.created` | A contact was added to a contact book. |
+| `contact.updated` | A contact's fields or subscription state changed. |
+| `contact.deleted` | A contact was removed. |
+</Accordion>
+<Accordion title="Domain events">
+| Type | When it fires |
+| --- | --- |
+| `domain.created` | A sending domain was added. |
+| `domain.verified` | A domain reached `SUCCESS` verification. |
+| `domain.updated` | Domain settings changed (e.g. tracking toggles). |
+| `domain.deleted` | A domain was removed. |
+</Accordion>
+<Accordion title="Test event">
+| Type | When it fires |
+| --- | --- |
+| `webhook.test` | Sent manually from the dashboard to validate an endpoint. |
+</Accordion>
+</Accordions>
+
+## Delivery contract
+
+- Delivery is an HTTP `POST` with a JSON body.
+- Your endpoint must respond with a **`2xx` status within 10 seconds**. Anything else (non-`2xx`, timeout, connection error) is treated as a failure.
+- Failed deliveries are **retried up to 6 attempts**. The `attempt` field in the payload and the `X-UseSend-Retry` header let you detect and dedupe retries.
+
+<Callout type="warn">
+Return `2xx` immediately, then process asynchronously. If you do heavy work (DB writes, downstream calls) inline and exceed the 10s window, useSend treats the delivery as failed and retries it — causing duplicate processing. Make your handler **idempotent** by keying on the envelope `id`.
+</Callout>
+
+## Payload envelope
+
+Every webhook body shares the same envelope. Event-specific fields live under `data`.
+
+```json
+{
+  "id": "evt_9f2c1a7b",
+  "type": "email.delivered",
+  "version": "2026-01-18",
+  "createdAt": "2026-09-01T14:32:10.221Z",
+  "teamId": 1,
+  "attempt": 1,
+  "data": {
+    "emailId": "clx8s0f7e0000abcd1234wxyz",
+    "to": "success@simulator.amazonses.com",
+    "from": "EverJust <hello@send.everjust.app>",
+    "subject": "Welcome to EverJust",
+    "status": "DELIVERED"
+  }
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Unique event id. Use it to dedupe retries. |
+| `type` | string | Event type (see list above). |
+| `version` | string | Payload schema version — currently `"2026-01-18"`. |
+| `createdAt` | string | ISO-8601 timestamp of the event. |
+| `teamId` | number | The Team (tenant) the event belongs to. |
+| `attempt` | number | Delivery attempt number (`1` on first try, up to `6`). |
+| `data` | object | Event-specific payload. |
+
+## Request headers
+
+Each delivery carries these headers:
+
+| Header | Description |
+| --- | --- |
+| `X-UseSend-Signature` | HMAC signature, formatted `v1=<hex>`. Verify before trusting the body. |
+| `X-UseSend-Timestamp` | Unix timestamp in **milliseconds** when the signature was generated. |
+| `X-UseSend-Event` | The event type (mirrors `type` in the body). |
+| `X-UseSend-Call` | Identifier for this delivery call. |
+| `X-UseSend-Retry` | Retry indicator for this attempt. |
+
+## Verifying signatures
+
+useSend signs each request so you can confirm it genuinely came from your instance and was not tampered with.
+
+The signature is computed as:
+
+```
+HMAC-SHA256(secret, "{timestamp}.{rawBody}")
+```
+
+- `secret` — your endpoint's signing secret (`whsec_…`).
+- `timestamp` — the value of the `X-UseSend-Timestamp` header (milliseconds).
+- `rawBody` — the **exact raw request body bytes**, before any JSON parsing.
+- The result is hex-encoded and compared against the `v1=<hex>` value in `X-UseSend-Signature`.
+
+<Callout type="error">
+Verify against the **raw request body**, not a re-serialized object. `JSON.parse` then `JSON.stringify` can reorder keys or change whitespace, which breaks the HMAC. Capture the raw body in your framework (e.g. `express.raw()`, `request.body` bytes) and hash that.
+</Callout>
+
+Reject the request if the signature does not match, or if `X-UseSend-Timestamp` is more than **5 minutes** away from the current time (replay protection).
+
+<Tabs items={['Node','Python','cURL']}>
+<Tab value="Node">
+The SDK verifies and parses in one call. Pass the **raw body** and the request headers.
+
+```ts
+import { UseSend } from "usesend-js";
+import express from "express";
+
+const usesend = new UseSend(
+  process.env.USESEND_API_KEY!, // us_xxx
+  "https://mail.everjust.app/api/v1"
+);
+
+const app = express();
+
+// Capture the RAW body — do not use express.json() on this route.
+app.post(
+  "/webhooks/usesend",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    try {
+      const event = usesend
+        .webhooks(process.env.USESEND_WEBHOOK_SECRET!) // whsec_xxx
+        .constructEvent(req.body, { headers: req.headers });
+
+      // Signature + timestamp verified. Ack fast, process async.
+      res.status(200).send("ok");
+
+      switch (event.type) {
+        case "email.bounced":
+          console.log("bounce", event.data.emailId, event.data.bounce);
+          break;
+        case "email.opened":
+          console.log("open", event.data.emailId, event.data.open);
+          break;
+        // …handle other types
+      }
+    } catch (err) {
+      // Invalid signature or stale timestamp.
+      res.status(400).send("invalid signature");
+    }
+  }
+);
+```
+</Tab>
+<Tab value="Python">
+```python
+from usesend import UseSend
+from flask import Flask, request
+
+usesend = UseSend(
+    "us_xxx",
+    "https://mail.everjust.app/api/v1",
+)
+
+app = Flask(__name__)
+
+
+@app.post("/webhooks/usesend")
+def usesend_webhook():
+    # request.get_data() returns the RAW body bytes.
+    raw_body = request.get_data()
+    try:
+        event = usesend.webhooks("whsec_xxx").construct_event(
+            raw_body,
+            headers=dict(request.headers),
+        )
+    except Exception:
+        return "invalid signature", 400
+
+    if event["type"] == "email.bounced":
+        print("bounce", event["data"]["emailId"], event["data"]["bounce"])
+    elif event["type"] == "email.opened":
+        print("open", event["data"]["emailId"], event["data"]["open"])
+
+    return "ok", 200
+```
+</Tab>
+<Tab value="cURL">
+There is no cURL step for *verification* — verification happens in your server code. This shows the manual HMAC computation your handler performs, expressed as shell for illustration:
+
+```bash
+# Given the incoming request:
+TIMESTAMP="1756737130221"          # X-UseSend-Timestamp (ms)
+RAW_BODY='{"id":"evt_9f2c1a7b","type":"email.delivered",...}'  # exact bytes
+SECRET="whsec_xxx"
+
+# Signed string is "{timestamp}.{rawBody}"
+SIGNED="${TIMESTAMP}.${RAW_BODY}"
+
+# Compute HMAC-SHA256, hex-encoded:
+printf '%s' "$SIGNED" | \
+  openssl dgst -sha256 -hmac "$SECRET" -r | awk '{print "v1="$1}'
+
+# Compare the output against the X-UseSend-Signature header
+# using a constant-time comparison, and reject if the
+# X-UseSend-Timestamp is more than 5 minutes old.
+```
+</Tab>
+</Tabs>
+
+### Manual verification (no SDK)
+
+If you are not using an SDK, implement the same check directly. This Node example uses only the standard library and a constant-time comparison:
+
+```ts
+import crypto from "node:crypto";
+
+function verifyUseSendWebhook(
+  rawBody: Buffer | string,
+  headers: Record<string, string | string[] | undefined>,
+  secret: string // whsec_xxx
+): boolean {
+  const signatureHeader = String(headers["x-usesend-signature"] ?? "");
+  const timestamp = String(headers["x-usesend-timestamp"] ?? "");
+  if (!signatureHeader.startsWith("v1=") || !timestamp) return false;
+
+  // 5-minute replay tolerance (timestamp is in milliseconds).
+  const ageMs = Math.abs(Date.now() - Number(timestamp));
+  if (!Number.isFinite(ageMs) || ageMs > 5 * 60 * 1000) return false;
+
+  const body = Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : rawBody;
+  const signedString = `${timestamp}.${body}`; // "{timestamp}.{rawBody}"
+
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(signedString, "utf8")
+    .digest("hex");
+
+  const provided = signatureHeader.slice("v1=".length);
+
+  // Constant-time compare; guard against length mismatch.
+  const a = Buffer.from(expected, "hex");
+  const b = Buffer.from(provided, "hex");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+```
+
+## Per-event data payloads
+
+Most events carry the affected resource under `data` (e.g. `emailId`, `to`, `from`, `subject`, `status` for email events; contact/domain fields for those events). Certain email events add an extra object:
+
+<Tabs items={['bounce','open','click','suppression']}>
+<Tab value="bounce">
+`email.bounced` adds a `bounce` object:
+
+```json
+{
+  "type": "email.bounced",
+  "data": {
+    "emailId": "clx8s0f7e0000abcd1234wxyz",
+    "status": "BOUNCED",
+    "bounce": {
+      "type": "Permanent",
+      "subType": "General",
+      "message": "The email account that you tried to reach does not exist."
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `bounce.type` | string | Bounce category (e.g. `Permanent`, `Transient`). |
+| `bounce.subType` | string | Finer classification (e.g. `General`, `MailboxFull`). |
+| `bounce.message` | string | Human-readable diagnostic. |
+</Tab>
+<Tab value="open">
+`email.opened` adds an `open` object:
+
+```json
+{
+  "type": "email.opened",
+  "data": {
+    "emailId": "clx8s0f7e0000abcd1234wxyz",
+    "status": "OPENED",
+    "open": {
+      "timestamp": "2026-09-01T14:40:02.100Z",
+      "userAgent": "Mozilla/5.0 …",
+      "ip": "203.0.113.10"
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `open.timestamp` | string | When the open was recorded. |
+| `open.userAgent` | string | Client user agent. |
+| `open.ip` | string | Recipient IP. |
+</Tab>
+<Tab value="click">
+`email.clicked` adds a `click` object:
+
+```json
+{
+  "type": "email.clicked",
+  "data": {
+    "emailId": "clx8s0f7e0000abcd1234wxyz",
+    "status": "CLICKED",
+    "click": {
+      "timestamp": "2026-09-01T14:41:18.502Z",
+      "url": "https://everjust.app/welcome"
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `click.timestamp` | string | When the click was recorded. |
+| `click.url` | string | The tracked link that was clicked. |
+</Tab>
+<Tab value="suppression">
+`email.suppressed` adds a `suppression` object:
+
+```json
+{
+  "type": "email.suppressed",
+  "data": {
+    "emailId": "clx8s0f7e0000abcd1234wxyz",
+    "status": "SUPPRESSED",
+    "suppression": {
+      "type": "Bounce",
+      "reason": "Previous hard bounce for this recipient",
+      "source": "AUTO"
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `suppression.type` | string | Why the recipient is suppressed (e.g. `Bounce`, `Complaint`). |
+| `suppression.reason` | string | Human-readable explanation. |
+| `suppression.source` | string | What added the suppression. |
+</Tab>
+</Tabs>
+
+<Callout type="info">
+**Self-hosted note.** This instance runs one AWS deployment with SES currently in **sandbox** — until production access is granted, you will only see delivery events for verified addresses or the SES mailbox simulator (`success@`, `bounce@`, `complaint@simulator.amazonses.com`). The simulator addresses are the easiest way to exercise `email.delivered`, `email.bounced`, and `email.complained` handlers end to end. Rate limiting is disabled on self-hosted useSend, so it does not affect webhook throughput.
+</Callout>
+
+## Next steps
+
+<Cards>
+<Card title="Sending email" href="/docs/emails">
+Trigger the events your webhooks receive.
+</Card>
+<Card title="Analytics" href="/docs/analytics">
+Aggregate delivery, open, and click metrics via the REST API.
+</Card>
+<Card title="Domains" href="/docs/domains">
+Enable open/click tracking to receive `email.opened` and `email.clicked`.
+</Card>
+</Cards>

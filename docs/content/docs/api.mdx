@@ -1,0 +1,211 @@
+---
+title: API Reference
+description: Base URL, authentication, errors, pagination, and idempotency for the self-hosted useSend REST API.
+---
+
+The useSend REST API is a self-hosted service backed by Amazon SES. Every product ("Team") on the shared EverJust deployment gets its own sending domains and API keys and reaches the API at the same base URL.
+
+## Base URL
+
+```text
+https://mail.everjust.app/api/v1
+```
+
+The dashboard lives at [https://mail.everjust.app](https://mail.everjust.app). All resource paths below are relative to the base URL — for example, `POST /v1/emails` is `https://mail.everjust.app/api/v1/emails`.
+
+<Callout type="info">
+  This is a self-hosted deployment. Two things differ from useSend Cloud: **rate limiting is disabled**, and SES is currently in **sandbox** (see below).
+</Callout>
+
+## Authentication
+
+Every request uses HTTP Bearer authentication. Pass your API key in the `Authorization` header exactly as:
+
+```http
+Authorization: Bearer us_xxxxxxxxxxxxxxxxxxxxx
+```
+
+API keys are scoped to a single Team and always carry the `us_` prefix. The EverJust Team already has a verified sending domain (`send.everjust.app`) and a working key.
+
+<Callout type="warn">
+  API keys are **created in the dashboard**, not through the REST API. In the useSend dashboard, open **Settings → API Keys → Create API Key**, copy the `us_` value once (it is shown only at creation), and store it as a secret in your product's environment.
+</Callout>
+
+A minimal authenticated request:
+
+<Tabs items={['cURL','Node','Python']}>
+  <Tab value="cURL">
+
+```bash
+curl https://mail.everjust.app/api/v1/domains \
+  -H "Authorization: Bearer us_xxxxxxxxxxxxxxxxxxxxx"
+```
+
+  </Tab>
+  <Tab value="Node">
+
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend(
+  process.env.USESEND_API_KEY!, // us_xxx
+  "https://mail.everjust.app/api/v1"
+);
+
+const { data, error } = await usesend.domains.list();
+```
+
+  </Tab>
+  <Tab value="Python">
+
+```python
+from usesend import UseSend
+
+usesend = UseSend(
+    key="us_xxxxxxxxxxxxxxxxxxxxx",
+    url="https://mail.everjust.app/api/v1",
+)
+
+domains = usesend.domains.list()
+```
+
+  </Tab>
+</Tabs>
+
+## Errors
+
+Errors return the appropriate HTTP status and a consistent JSON envelope:
+
+```json
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "subject or templateId is required"
+  }
+}
+```
+
+| Code | HTTP status | Meaning |
+| --- | --- | --- |
+| `BAD_REQUEST` | 400 | Malformed request or invalid/missing fields. |
+| `UNAUTHORIZED` | 401 | Missing or invalid API key. |
+| `FORBIDDEN` | 403 | Key is valid but not permitted for this resource. |
+| `NOT_FOUND` | 404 | The resource does not exist. |
+| `NOT_UNIQUE` | 409 | Conflicts with an existing resource. |
+| `RATE_LIMITED` | 429 | Too many requests (not emitted on this self-hosted deployment — see below). |
+| `INTERNAL_SERVER_ERROR` | 500 | Unexpected server error. |
+
+Both SDKs surface errors in the same shape. Node returns `{ data, error }` (never throws for API errors); Python raises on non-2xx.
+
+```ts
+const { data, error } = await usesend.emails.send({ /* … */ });
+if (error) {
+  console.error(error.code, error.message);
+} else {
+  console.log(data.emailId);
+}
+```
+
+## Rate limiting
+
+Rate limiting is **disabled** on this self-hosted deployment. Requests are not throttled and `RATE_LIMITED` (429) is not returned.
+
+<Callout type="info">
+  The `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` response headers only appear on useSend Cloud. Do not rely on them here — they are absent. Note that Amazon SES still enforces its own per-second and per-day send quotas beneath useSend.
+</Callout>
+
+## Pagination
+
+List endpoints paginate with `page` (1-based) and `limit` query parameters.
+
+```bash
+curl "https://mail.everjust.app/api/v1/emails?page=2&limit=50" \
+  -H "Authorization: Bearer us_xxxxxxxxxxxxxxxxxxxxx"
+```
+
+Defaults vary by endpoint — `GET /v1/emails` defaults to `page=1`, `limit=50`, while contacts default to `page=1`. Responses that paginate include a `count` (or `totalPage`) alongside their `data` array so you can walk pages until exhausted.
+
+## Idempotency
+
+`POST /v1/emails` and `POST /v1/emails/batch` accept an optional `Idempotency-Key` header. Retrying a request with the same key returns the original result instead of sending a duplicate — use it to make send retries safe across network failures.
+
+<Tabs items={['cURL','Node','Python']}>
+  <Tab value="cURL">
+
+```bash
+curl https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer us_xxxxxxxxxxxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-4821-confirmation" \
+  -d '{
+    "to": "success@simulator.amazonses.com",
+    "from": "EverJust <hello@send.everjust.app>",
+    "subject": "Your order is confirmed",
+    "html": "<p>Thanks for your order.</p>"
+  }'
+```
+
+  </Tab>
+  <Tab value="Node">
+
+```ts
+const { data, error } = await usesend.emails.send(
+  {
+    to: "success@simulator.amazonses.com",
+    from: "EverJust <hello@send.everjust.app>",
+    subject: "Your order is confirmed",
+    html: "<p>Thanks for your order.</p>",
+  },
+  { idempotencyKey: "order-4821-confirmation" }
+);
+```
+
+  </Tab>
+  <Tab value="Python">
+
+```python
+resp = usesend.emails.send(
+    {
+        "to": "success@simulator.amazonses.com",
+        "from_": "EverJust <hello@send.everjust.app>",
+        "subject": "Your order is confirmed",
+        "html": "<p>Thanks for your order.</p>",
+    },
+    {"idempotency_key": "order-4821-confirmation"},
+)
+```
+
+  </Tab>
+</Tabs>
+
+## SES sandbox
+
+Amazon SES is currently in **sandbox mode** on this deployment. Until AWS grants production access (requested, pending), you can only send to:
+
+- Verified email addresses, or
+- The SES mailbox simulator: `success@simulator.amazonses.com`, `bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`.
+
+Once production access is granted, any recipient is allowed with no code changes. Use the simulator addresses to exercise delivery, bounce, and complaint paths end to end while in sandbox.
+
+## Resources
+
+<Cards>
+  <Card title="Sending email" href="/docs/sending-email">Send single and batch emails, schedule, cancel, and track status.</Card>
+  <Card title="Domains" href="/docs/domains">Register sending domains, verify DNS, and read DKIM/SPF/DMARC state.</Card>
+  <Card title="Contacts" href="/docs/contacts">Manage contact books, contacts, and campaigns (broadcasts).</Card>
+  <Card title="Webhooks" href="/docs/webhooks">Receive delivery events and verify their HMAC signatures.</Card>
+</Cards>
+
+## Utility routes
+
+These endpoints support health checks and machine-readable API exploration:
+
+| Route | Description |
+| --- | --- |
+| `GET /api/health` | Liveness/health check. |
+| `GET /api/v1/doc` | OpenAPI specification (JSON). |
+| `GET /api/v1/ui` | Swagger UI for browsing the API interactively. |
+
+<Callout type="info">
+  **Dashboard-managed, not public REST.** Templates, suppressions, webhook configuration, and API-key creation are managed in the useSend dashboard and have no public REST endpoints. You still *use* templates when sending — pass `templateId` and `variables` on `POST /v1/emails` — but you create and edit them in the dashboard.
+</Callout>

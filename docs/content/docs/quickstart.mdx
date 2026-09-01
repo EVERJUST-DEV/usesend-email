@@ -1,0 +1,200 @@
+---
+title: Quickstart
+description: Send your first transactional email through EverJust's self-hosted useSend on AWS SES, then confirm delivery.
+---
+
+Send your first email through useSend in a few minutes. This guide uses the already-provisioned EverJust Team and its verified `send.everjust.app` domain, so you can go straight to an API call.
+
+## Prerequisites
+
+You need three things, all scoped to a single **Team** (a Team is one tenant — one product, with its own domains and keys):
+
+- An existing **Team** — `EverJust` is already created.
+- A **verified sending domain** — `send.everjust.app` is verified (DKIM, SPF, DMARC, and MAIL FROM all pass).
+- An **API key** — a key with the `us_` prefix already exists.
+
+<Callout type="info">
+Standing up a new product instead? See [Onboard a product](/docs/onboard-a-product) to create a Team, verify a domain, and mint an API key.
+</Callout>
+
+## Base URL and auth
+
+All requests go to the self-hosted instance:
+
+```text
+https://mail.everjust.app/api/v1
+```
+
+Authenticate with HTTP Bearer using your `us_`-prefixed key. The header is exactly:
+
+```http
+Authorization: Bearer us_xxx
+```
+
+Store the key in your environment so it never lands in source:
+
+```bash
+export USESEND_API_KEY="us_xxx"
+```
+
+<Callout type="info">
+Rate limiting is **disabled** on this self-hosted instance — no `429`/backoff handling is required.
+</Callout>
+
+## Sandbox and the mailbox simulator
+
+Amazon SES is currently in **sandbox mode** (production access requested, pending). Until it is granted you can only send to:
+
+- Verified email addresses on the account, or
+- The SES mailbox simulator: `success@simulator.amazonses.com`, `bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`.
+
+The simulator accepts mail without emailing a real person and drives a deterministic outcome — `success@` delivers cleanly, `bounce@` produces a hard bounce, `complaint@` produces a complaint. That makes it the right target for a first send. Once production access lands, you can send to any recipient.
+
+## Send your first email
+
+Send from `EverJust <hello@send.everjust.app>` to the simulator's success address. A request needs `to`, `from`, a `subject` (or a `templateId`), and either `text` or `html`.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "success@simulator.amazonses.com",
+    "from": "EverJust <hello@send.everjust.app>",
+    "subject": "Hello from useSend",
+    "html": "<p>Your first email is on its way.</p>",
+    "text": "Your first email is on its way."
+  }'
+```
+
+</Tab>
+<Tab value="Node">
+
+Install the SDK:
+
+```bash
+npm install usesend-js
+```
+
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend(
+  process.env.USESEND_API_KEY!,
+  "https://mail.everjust.app/api/v1"
+);
+
+const { data, error } = await usesend.emails.send({
+  to: "success@simulator.amazonses.com",
+  from: "EverJust <hello@send.everjust.app>",
+  subject: "Hello from useSend",
+  html: "<p>Your first email is on its way.</p>",
+  text: "Your first email is on its way.",
+});
+
+if (error) {
+  console.error(error);
+} else {
+  console.log("Queued:", data?.emailId);
+}
+```
+
+</Tab>
+<Tab value="Python">
+
+Install the SDK:
+
+```bash
+pip install usesend
+```
+
+```python
+import os
+from usesend import UseSend
+
+usesend = UseSend(
+    os.environ["USESEND_API_KEY"],
+    "https://mail.everjust.app/api/v1",
+)
+
+result = usesend.emails.send({
+    "to": "success@simulator.amazonses.com",
+    "from_": "EverJust <hello@send.everjust.app>",
+    "subject": "Hello from useSend",
+    "html": "<p>Your first email is on its way.</p>",
+    "text": "Your first email is on its way.",
+})
+
+print(result)
+```
+
+<Callout type="info">
+`from` is a reserved word in Python, so the SDK exposes it as the `from_` alias.
+</Callout>
+
+</Tab>
+</Tabs>
+
+A successful call returns `200` with the email's id:
+
+```json
+{ "emailId": "em_3f9c8b2a" }
+```
+
+<Callout type="warn">
+Sending to any address other than a verified one or the simulator while SES is in sandbox will fail. Keep first sends pointed at `*@simulator.amazonses.com`.
+</Callout>
+
+## Check delivery status
+
+Fetch the email by id to see its lifecycle. The `emailEvents` array records each status transition; for the simulator's success address you'll see it progress from `SENT` to `DELIVERED`.
+
+```bash
+curl https://mail.everjust.app/api/v1/emails/em_3f9c8b2a \
+  -H "Authorization: Bearer $USESEND_API_KEY"
+```
+
+```json
+{
+  "id": "em_3f9c8b2a",
+  "teamId": "team_everjust",
+  "to": "success@simulator.amazonses.com",
+  "from": "EverJust <hello@send.everjust.app>",
+  "subject": "Hello from useSend",
+  "html": "<p>Your first email is on its way.</p>",
+  "text": "Your first email is on its way.",
+  "createdAt": "2026-09-01T15:04:05.000Z",
+  "updatedAt": "2026-09-01T15:04:07.000Z",
+  "emailEvents": [
+    { "emailId": "em_3f9c8b2a", "status": "QUEUED",    "createdAt": "2026-09-01T15:04:05.000Z", "data": null },
+    { "emailId": "em_3f9c8b2a", "status": "SENT",       "createdAt": "2026-09-01T15:04:06.000Z", "data": null },
+    { "emailId": "em_3f9c8b2a", "status": "DELIVERED",  "createdAt": "2026-09-01T15:04:07.000Z", "data": null }
+  ]
+}
+```
+
+The top-level status is exposed as `latestStatus` in list responses (`GET /v1/emails`). The full status enum is: `SCHEDULED`, `QUEUED`, `SENT`, `DELIVERY_DELAYED`, `BOUNCED`, `REJECTED`, `RENDERING_FAILURE`, `DELIVERED`, `OPENED`, `CLICKED`, `COMPLAINED`, `FAILED`, `CANCELLED`, `SUPPRESSED`.
+
+<Callout type="info">
+Want to react to these transitions in your app instead of polling? Configure a webhook to receive `email.sent`, `email.delivered`, `email.bounced`, and friends.
+</Callout>
+
+## Next steps
+
+<Cards>
+  <Card title="Onboard a product" href="/docs/onboard-a-product">
+    Create a Team, verify a sending domain, and mint an API key for a new product.
+  </Card>
+  <Card title="Send emails" href="/docs/emails">
+    Full send reference — cc/bcc, attachments, headers, scheduling, and batch sends.
+  </Card>
+  <Card title="Templates" href="/docs/templates">
+    Send with `templateId` + `variables` instead of inline HTML.
+  </Card>
+  <Card title="Webhooks" href="/docs/webhooks">
+    Receive delivery events and verify signatures on the raw request body.
+  </Card>
+</Cards>

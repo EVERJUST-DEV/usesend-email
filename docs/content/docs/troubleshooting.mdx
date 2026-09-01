@@ -1,0 +1,166 @@
+---
+title: Troubleshooting
+description: Common useSend errors on the EverJust self-hosted deployment and how to fix them fast.
+---
+
+Common failures when integrating against `https://mail.everjust.app/api/v1`, with actionable fixes. Most send-time errors trace back to one of two things: useSend's own domain-verification state, or the fact that SES is still in the sandbox.
+
+<Callout type="info">
+  This is one AWS deployment sending via Amazon SES. Rate limiting is **disabled** on self-hosted useSend, so a `429` here almost always means you are pointing at the wrong host. See the last item below.
+</Callout>
+
+## Error envelope
+
+Every API error uses the same shape, so you can match on `error.code`:
+
+```json
+{ "error": { "code": "BAD_REQUEST", "message": "Domain: send.everjust.app is not verified" } }
+```
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `BAD_REQUEST` | 400 | Malformed body, or domain not verified in useSend |
+| `UNAUTHORIZED` | 401 | Missing or invalid Bearer key |
+| `FORBIDDEN` | 403 | Key valid but not permitted for this resource |
+| `NOT_FOUND` | 404 | No such email, domain, contact, etc. |
+| `NOT_UNIQUE` | 409 | Duplicate (e.g. domain already exists) |
+| `RATE_LIMITED` | 429 | Not possible on self-hosted — wrong host |
+| `INTERNAL_SERVER_ERROR` | 500 | Server-side failure |
+
+## Common issues
+
+<Accordions>
+
+<Accordion title='BAD_REQUEST "Domain: X is not verified" even though SES shows verified'>
+
+useSend re-checks its **own database** record for the domain, not SES directly. The SES console can show verified while useSend's `status` is still `PENDING`.
+
+Refresh useSend's view of the domain:
+
+```bash
+curl -X PUT https://mail.everjust.app/api/v1/domains/1/verify \
+  -H "Authorization: Bearer us_xxx"
+```
+
+Or open the domain in the dashboard at `https://mail.everjust.app`, which triggers the same re-check. Then confirm:
+
+```bash
+curl https://mail.everjust.app/api/v1/domains/1 \
+  -H "Authorization: Bearer us_xxx"
+```
+
+The `status` field should read `SUCCESS`. The path id is the domain's numeric id — see [Domains](/docs/domains).
+
+</Accordion>
+
+<Accordion title='"Email address is not verified" on send'>
+
+SES is currently in the **sandbox**. Until AWS grants production access (requested, pending), you can only send to:
+
+- addresses verified in SES, or
+- the SES mailbox simulator: `success@simulator.amazonses.com`, `bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`.
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Sandbox test",
+    "text": "Delivered through the SES simulator."
+  }'
+```
+
+Once production access lands, any recipient works with no code change.
+
+</Accordion>
+
+<Accordion title="401 UNAUTHORIZED or 403 FORBIDDEN">
+
+The `Authorization` header is missing, malformed, or the key is wrong. It must be exactly:
+
+```http
+Authorization: Bearer us_xxx
+```
+
+Checklist:
+
+- The scheme is `Bearer` with a single space before the key.
+- The key carries the `us_` prefix and belongs to the **EverJust** team.
+- The key is passed on every request — there is no session or cookie fallback.
+
+A `403` means the key authenticated but is not permitted for that resource; a `401` means it did not authenticate at all. API keys are created in the dashboard (not over REST).
+
+</Accordion>
+
+<Accordion title="DKIM stuck on PENDING">
+
+DKIM stays `PENDING` when DNS has not propagated yet, or a record was entered with a typo. Pull the exact expected records and compare them byte-for-byte with what is published:
+
+```bash
+curl https://mail.everjust.app/api/v1/domains/1 \
+  -H "Authorization: Bearer us_xxx"
+```
+
+Inspect `dnsRecords[]` and re-check each `name`/`value` pair against your DNS provider — the DKIM `TXT` records, the SPF entry, and the custom `MAIL FROM` records. Watch for a provider that appends the zone apex (a duplicated `send.everjust.app.send.everjust.app`), trailing dots, or truncated values. After fixing DNS, re-run verification:
+
+```bash
+curl -X PUT https://mail.everjust.app/api/v1/domains/1/verify \
+  -H "Authorization: Bearer us_xxx"
+```
+
+Propagation can take up to a few hours depending on TTL.
+
+</Accordion>
+
+<Accordion title="High bounce or complaint rate">
+
+SES tracks reputation per account. If bounces or complaints climb too high, **SES can pause sending** for the whole deployment — affecting every EverJust product on this instance.
+
+Keep **bounce rate under 5%** and **complaint rate under 0.1%**. Watch them:
+
+```bash
+curl "https://mail.everjust.app/api/v1/analytics/reputation-metrics?domainId=1" \
+  -H "Authorization: Bearer us_xxx"
+```
+
+The response returns `bounceRate` and `complaintRate`. Mitigate by sending only to addresses that opted in, removing hard-bounced recipients promptly, and honoring complaints. See [Analytics](/docs/analytics).
+
+</Accordion>
+
+<Accordion title='Local "aws" CLI fails with "Signature not yet current"'>
+
+This is **clock skew** on your machine, not a useSend problem. SES rejects SigV4 requests whose timestamp is too far from AWS's clock. Sync your system time:
+
+```bash
+# macOS
+sudo sntp -sS time.apple.com
+
+# Linux (systemd)
+sudo timedatectl set-ntp true
+```
+
+Then retry the command.
+
+</Accordion>
+
+<Accordion title="429 RATE_LIMITED">
+
+Rate limiting is **disabled** on this self-hosted useSend deployment. A genuine `429` from `mail.everjust.app` should not happen.
+
+If you see one, you are almost certainly hitting **useSend Cloud** (the hosted service) instead of the EverJust instance. Confirm your base URL is exactly `https://mail.everjust.app/api/v1` and that no SDK default or environment variable is overriding it.
+
+</Accordion>
+
+</Accordions>
+
+## Still stuck
+
+<Cards>
+  <Card title="Sending email" href="/docs/emails">Payload fields, batch, scheduling, and status codes.</Card>
+  <Card title="Domains" href="/docs/domains">Add and verify sending domains, read DNS records.</Card>
+  <Card title="Webhooks" href="/docs/webhooks">Delivery events and signature verification.</Card>
+</Cards>
+
+If a problem persists after these steps, check the deployment (Terraform infra + MCP server + these docs) at `github.com/EVERJUST-DEV/usesend-email`.

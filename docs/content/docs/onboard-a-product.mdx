@@ -1,0 +1,214 @@
+---
+title: Onboard a Product
+description: The repeatable flow for giving a new EverJust product its own useSend tenant, sending domain, and API key.
+---
+
+Every EverJust product gets its own **Team** (tenant) inside the single useSend deployment at [mail.everjust.app](https://mail.everjust.app). A Team owns its own sending domains, contacts, campaigns, and API keys — nothing is shared between products. This page is the checklist you follow each time you stand up a new product.
+
+<Callout type="info">
+Reference implementation: the Team **EverJust** with sending domain **send.everjust.app** was created with exactly these steps. Its DKIM, SPF, DMARC, and MAIL FROM records are all verified, and it has a live `us_` API key. Mirror it for the next product.
+</Callout>
+
+## Before you start
+
+- Access to the useSend dashboard at [mail.everjust.app](https://mail.everjust.app).
+- Ability to publish DNS records for the product's domain (Route 53 or wherever it is hosted).
+- The AWS SES region for this deployment: **`us-east-1`**. Domains must be created in this region.
+
+<Callout type="warn">
+Self-hosted useSend has **no Route 53 (or any DNS) permission**. It only *shows* you the records to publish — it never writes them. You add every DNS record yourself. If the domain lives in Route 53, use the repo helper `scripts/add-tenant-dns.sh` (in [github.com/EVERJUST-DEV/usesend-email](https://github.com/EVERJUST-DEV/usesend-email)) to script it; otherwise add them by hand in your DNS provider.
+</Callout>
+
+## The flow
+
+<Steps>
+
+<Step>
+### Create a Team for the product
+
+In the dashboard, create a new Team — **one Team per product**. The Team is the tenant boundary: its domains, API keys, contacts, campaigns, and analytics are fully isolated from every other product. Name it after the product so it is unambiguous in the Team switcher.
+
+Team creation is a dashboard action; there is no public REST endpoint for it.
+</Step>
+
+<Step>
+### Add a sending domain
+
+Use a **subdomain** dedicated to sending — e.g. `send.yourproduct.com` — never the product's root domain. This keeps the sending reputation and DNS isolated from the rest of the product's mail and web records.
+
+Add it in the dashboard (**Domains → Add**) or over the API:
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+```bash
+curl -X POST https://mail.everjust.app/api/v1/domains \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "send.yourproduct.com",
+    "region": "us-east-1"
+  }'
+```
+</Tab>
+<Tab value="Node">
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend("us_xxx", "https://mail.everjust.app/api/v1");
+
+const { data, error } = await usesend.domains.create({
+  name: "send.yourproduct.com",
+  region: "us-east-1",
+});
+```
+</Tab>
+<Tab value="Python">
+```python
+from usesend import UseSend
+
+usesend = UseSend("us_xxx", "https://mail.everjust.app/api/v1")
+
+domain = usesend.domains.create({
+    "name": "send.yourproduct.com",
+    "region": "us-east-1",
+})
+```
+</Tab>
+</Tabs>
+
+`region` is **required** and must match the deployment's SES region (`us-east-1`). The response is a `Domain` object whose numeric `id` you use in later calls, and whose `dnsRecords` array holds the records to publish in the next step.
+</Step>
+
+<Step>
+### Publish the DNS records useSend shows you
+
+Open the domain in the dashboard (or read `dnsRecords` from the create response) and publish every record. For `send.yourproduct.com` you get:
+
+| Purpose | Type | Name | Value |
+| --- | --- | --- | --- |
+| DKIM | TXT | `usesend._domainkey.send.yourproduct.com` | the public key useSend generated |
+| MAIL FROM | MX | `mail.send.yourproduct.com` | `feedback-smtp.us-east-1.amazonses.com` (priority 10) |
+| SPF (MAIL FROM) | TXT | `mail.send.yourproduct.com` | `v=spf1 include:amazonses.com ~all` |
+| DMARC (recommended) | TXT | `_dmarc.send.yourproduct.com` | `v=DMARC1; p=none;` |
+
+Use the exact `name`, `value`, `ttl`, and `priority` values that useSend renders — the table above shows the shape, not verbatim strings. DMARC is marked `recommended`; publish it.
+
+If the domain is in Route 53, script the whole set:
+
+```bash
+./scripts/add-tenant-dns.sh send.yourproduct.com
+```
+</Step>
+
+<Step>
+### Verify the domain
+
+Once DNS has propagated, trigger verification from the dashboard (**Verify domain**) or over the API:
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+```bash
+curl -X PUT https://mail.everjust.app/api/v1/domains/42/verify \
+  -H "Authorization: Bearer us_xxx"
+```
+</Tab>
+<Tab value="Node">
+```ts
+await usesend.domains.verify(42);
+```
+</Tab>
+<Tab value="Python">
+```python
+usesend.domains.verify(42)
+```
+</Tab>
+</Tabs>
+
+Poll the domain until its `status` reaches `SUCCESS` and `dkimStatus` confirms DKIM is verified — **DKIM must reach SUCCESS before SES will accept sends**. Propagation can take anywhere from minutes to a few hours depending on the DNS provider's TTL.
+
+```bash
+curl https://mail.everjust.app/api/v1/domains/42 \
+  -H "Authorization: Bearer us_xxx"
+```
+</Step>
+
+<Step>
+### Create a scoped API key
+
+In **Developer settings**, create an API key for this product's Team. Keys carry the `us_` prefix and are used as an HTTP Bearer token:
+
+```http
+Authorization: Bearer us_xxx
+```
+
+Store it in the product's secret manager. API-key creation is dashboard-only — there is no public endpoint for minting keys.
+</Step>
+
+<Step>
+### Send a test to the SES simulator
+
+<Callout type="warn">
+SES for this deployment is currently in **sandbox**. Until AWS grants production access (requested, pending), you can only send to verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`). After production access is granted, you can send to any recipient.
+</Callout>
+
+Confirm the whole path end-to-end by sending to the simulator's success address:
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "YourProduct <hello@send.yourproduct.com>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "useSend onboarding test",
+    "html": "<p>If this is delivered, the tenant is live.</p>"
+  }'
+```
+</Tab>
+<Tab value="Node">
+```ts
+const { data, error } = await usesend.emails.send({
+  from: "YourProduct <hello@send.yourproduct.com>",
+  to: "success@simulator.amazonses.com",
+  subject: "useSend onboarding test",
+  html: "<p>If this is delivered, the tenant is live.</p>",
+});
+```
+</Tab>
+<Tab value="Python">
+```python
+result = usesend.emails.send({
+    "from_": "YourProduct <hello@send.yourproduct.com>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "useSend onboarding test",
+    "html": "<p>If this is delivered, the tenant is live.</p>",
+})
+```
+</Tab>
+</Tabs>
+
+A `200` with `{"emailId":"..."}` means the send was accepted. Look the email up in the dashboard (or `GET /v1/emails/{emailId}`) and confirm its status progresses to `DELIVERED`.
+</Callout>
+</Step>
+
+</Steps>
+
+<Callout type="info">
+Rate limiting is **disabled** on self-hosted useSend, so no throttle applies to onboarding sends or the API key you just created.
+</Callout>
+
+## Next steps
+
+<Cards>
+<Card title="Send an email" href="/docs/send-an-email">
+Full field reference for POST /v1/emails, scheduling, and attachments.
+</Card>
+<Card title="Domains" href="/docs/domains">
+The Domain object, DNS records, and verification lifecycle in detail.
+</Card>
+<Card title="Webhooks" href="/docs/webhooks">
+Receive delivery, bounce, and complaint events for the new tenant.
+</Card>
+</Cards>

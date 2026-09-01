@@ -1,0 +1,105 @@
+---
+title: Architecture (AWS)
+description: How the EverJust useSend instance runs on AWS — VPC, ECS Fargate, RDS, Redis, ALB, SES, and the end-to-end send and event path.
+---
+
+This page describes how the single EverJust useSend instance is deployed on AWS. Everything below is provisioned by Terraform in the `terraform/` directory of [github.com/EVERJUST-DEV/usesend-email](https://github.com/EVERJUST-DEV/usesend-email) — the diagram and the resource list are the code, not a whiteboard sketch.
+
+<Callout type="info">
+One AWS deployment serves every product. Tenancy is logical: a **Team** is a tenant, with its own sending domains and API keys. See [Tenant isolation](/docs/tenant-isolation) for how Teams keep products apart on shared infrastructure.
+</Callout>
+
+## Topology
+
+```text
+                              Internet
+                                 │
+                    ┌────────────┼────────────────────────┐
+                    │            │ (443, mail.everjust.app)│
+                    │            ▼                         │
+                    │   ┌──────────────────┐               │
+                    │   │  ALB + ACM (TLS) │  Route 53 DNS │
+                    │   └────────┬─────────┘               │
+                    │            │ SG: only ALB → task     │
+   VPC (2 AZs)      │            ▼                         │
+   ┌────────────────┼──────────────────────────────────┐  │
+   │ PUBLIC subnets │                                   │  │
+   │  ┌─────────────▼──────────────────────────────┐   │  │
+   │  │ ECS Fargate — 1 useSend container          │   │  │
+   │  │  web server + in-process BullMQ workers    │───┼──┼──► SES API
+   │  │  public IP (egress; no NAT gateway)        │   │  │   (send)
+   │  └───────┬───────────────────────┬────────────┘   │  │
+   │          │                       │                │  │
+   │ PRIVATE subnets                  │                │  │
+   │  ┌───────▼────────┐   ┌──────────▼───────────┐    │  │
+   │  │ RDS Postgres   │   │ ElastiCache Redis     │    │  │
+   │  │ (application   │   │ (BullMQ queue;        │    │  │
+   │  │  data)         │   │  maxmemory-policy     │    │  │
+   │  └────────────────┘   │  noeviction)          │    │  │
+   │                       └──────────────────────┘    │  │
+   └───────────────────────────────────────────────────┘  │
+                    │            ▲                         │
+                    │ S3 assets  │ SES delivery events     │
+                    └────────────┼─────────────────────────┘
+                                 │
+                          SNS topic ──► POST /api/ses_callback
+                                        (updates useSend logs)
+```
+
+## Components
+
+| Layer | AWS service | Placement | Purpose |
+| --- | --- | --- | --- |
+| Compute | ECS Fargate (1 task) | Public subnets | Single useSend container: HTTP server + in-process BullMQ workers |
+| Ingress | ALB + ACM certificate | — | TLS termination for `mail.everjust.app`; only path to the task |
+| Database | RDS Postgres | Private subnets | All application/tenant data |
+| Queue | ElastiCache Redis | Private subnets | BullMQ job queue; `maxmemory-policy noeviction` |
+| Assets | S3 | — | Static assets |
+| DNS | Route 53 | — | `mail.everjust.app` and domain records |
+| Delivery | Amazon SES | — | Sends outbound mail; emits delivery events |
+| Events | SNS topic | — | Delivers SES notifications to `/api/ses_callback` |
+
+### Networking
+
+The VPC spans **two Availability Zones**. The Fargate task runs in **public subnets with a public IP**, which it uses for outbound egress (to the SES API, S3, and other AWS endpoints).
+
+<Callout type="warn">
+There is **no NAT gateway**. The AWS account had hit its Elastic IP cap, so the NAT gateway was dropped and the task egresses directly via its own public IP. This does not open the task to the internet: a security group restricts inbound traffic to the **ALB only**, so the container is not reachable except through `mail.everjust.app`. RDS and Redis stay in **private subnets** and are never internet-reachable.
+</Callout>
+
+## Send path
+
+The application talks to the SES API directly; SES delivers to the recipient.
+
+```text
+useSend container  ──►  Amazon SES API  ──►  recipient mailbox
+```
+
+Outbound sends are enqueued in Redis (BullMQ) and processed by the workers running inside the same container, then handed to SES.
+
+## Event path
+
+SES reports delivery outcomes back into useSend so message logs reflect real status:
+
+```text
+Amazon SES  ──►  SNS topic  ──►  POST /api/ses_callback  ──►  useSend updates the message log
+```
+
+This was verified end-to-end: a test send transitioned `SENT → DELIVERED` in the useSend logs, confirming the SES → SNS → callback loop is wired correctly.
+
+<Callout type="info">
+SES is currently in **sandbox**. Until AWS grants production access (requested, pending), sends are limited to verified addresses and the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@`, `complaint@`). After production access, any recipient is allowed. Rate limiting is **disabled** on this self-hosted instance — throughput is bounded only by SES sending limits.
+</Callout>
+
+## Cost
+
+Baseline infrastructure runs roughly **$65–80/month** (Fargate task, ALB, RDS, ElastiCache, and supporting resources), plus **Amazon SES per-email charges** on top. Cost scales primarily with SES send volume rather than with the number of Teams.
+
+## Reproducibility
+
+Every resource above is defined as Terraform in `terraform/` in the [usesend-email repo](https://github.com/EVERJUST-DEV/usesend-email). Infrastructure changes go through Terraform, not the console.
+
+<Cards>
+  <Card title="Operations" href="/docs/operations">Deploying, updating, and monitoring this instance.</Card>
+  <Card title="Tenant isolation" href="/docs/tenant-isolation">How Teams keep products separated on shared infrastructure.</Card>
+</Cards>

@@ -1,0 +1,396 @@
+---
+title: Sending Email
+description: Complete reference for the useSend send API — single sends, batches, scheduling, attachments, templates, threading, and status tracking.
+---
+
+Send transactional email through the self-hosted useSend instance at `https://mail.everjust.app`. All requests hit the base URL `https://mail.everjust.app/api/v1` and authenticate with an HTTP Bearer token.
+
+```http
+Authorization: Bearer us_xxx
+```
+
+<Callout type="warn">
+**SES is in sandbox.** Until AWS grants production access (requested, pending), the EverJust instance can only send to verified addresses or the SES mailbox simulator: `success@simulator.amazonses.com`, `bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`. After production access is granted, any recipient is allowed. Rate limiting is **disabled** on this self-hosted deployment.
+</Callout>
+
+## `POST /v1/emails` — field reference
+
+The send endpoint accepts a single JSON object. You must supply `to`, `from`, one of `subject` **or** `templateId`, and one of `text` **or** `html` (a template supplies the body when `templateId` is used).
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `to` | `string \| string[]` | Yes | One or more recipient addresses. |
+| `from` | `string` | Yes | Sender. `Name <a@b.com>` form is accepted, e.g. `EverJust <hello@send.everjust.app>`. Domain must be a verified sending domain. |
+| `subject` | `string` | Conditional | Required **unless** `templateId` is given. |
+| `templateId` | `string` | No | Renders a dashboard-managed template. Supplies the body; pair with `variables`. |
+| `variables` | `Record<string,string>` | No | Substitution values for the template. |
+| `replyTo` | `string \| string[]` | No | Reply-To address(es). |
+| `cc` | `string \| string[]` | No | CC recipient(s). |
+| `bcc` | `string \| string[]` | No | BCC recipient(s). |
+| `text` | `string \| null` | Conditional | Plain-text body. Required if `html` is absent (and no template). |
+| `html` | `string \| null` | Conditional | HTML body. Required if `text` is absent (and no template). |
+| `headers` | `Record<string,string>` | No | Custom SMTP headers. |
+| `attachments` | `array` (max 10) | No | Each item is `{ filename, content }` where `content` is base64. |
+| `scheduledAt` | `string` (ISO-8601 w/ offset) | No | Defer delivery to a future time. |
+| `inReplyToId` | `string \| null` | No | A useSend `emailId` to thread this message as a reply. |
+
+<Callout type="info">
+**Not supported by the API:** `tags`, and on attachments `path` / `contentType`. Attachment bodies must be inlined as base64 `content`. Template CRUD, suppressions, webhooks, and API-key creation are dashboard-only — see [Webhooks](/docs/webhooks) and [Domains](/docs/domains).
+</Callout>
+
+A successful send returns `200`:
+
+```json
+{ "emailId": "cuid_abc123" }
+```
+
+## Single send
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "success@simulator.amazonses.com",
+    "from": "EverJust <hello@send.everjust.app>",
+    "subject": "Welcome to EverJust",
+    "html": "<h1>Welcome</h1><p>Glad you are here.</p>",
+    "text": "Welcome — glad you are here."
+  }'
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend(
+  process.env.USESEND_API_KEY!,
+  "https://mail.everjust.app/api/v1"
+);
+
+const { data, error } = await usesend.emails.send({
+  to: "success@simulator.amazonses.com",
+  from: "EverJust <hello@send.everjust.app>",
+  subject: "Welcome to EverJust",
+  html: "<h1>Welcome</h1><p>Glad you are here.</p>",
+  text: "Welcome — glad you are here.",
+});
+
+if (error) throw new Error(error.message);
+console.log(data?.emailId);
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+import os
+from usesend import UseSend
+
+usesend = UseSend(
+    os.environ["USESEND_API_KEY"],
+    "https://mail.everjust.app/api/v1",
+)
+
+result = usesend.emails.send({
+    "to": "success@simulator.amazonses.com",
+    "from_": "EverJust <hello@send.everjust.app>",
+    "subject": "Welcome to EverJust",
+    "html": "<h1>Welcome</h1><p>Glad you are here.</p>",
+    "text": "Welcome — glad you are here.",
+})
+
+print(result)
+```
+
+<Callout type="info">
+The Python SDK uses `from_` as the alias for the reserved `from` keyword; it is sent as `from` on the wire.
+</Callout>
+
+</Tab>
+</Tabs>
+
+### Idempotency
+
+Both the send and batch endpoints accept an optional `Idempotency-Key` header so retries do not create duplicate sends.
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Idempotency-Key: welcome-user-8821" \
+  -H "Content-Type: application/json" \
+  -d '{ "to": "success@simulator.amazonses.com", "from": "EverJust <hello@send.everjust.app>", "subject": "Hi", "text": "Hi" }'
+```
+
+```ts
+await usesend.emails.send(payload, { idempotencyKey: "welcome-user-8821" });
+```
+
+## Batch send
+
+`POST /v1/emails/batch` takes a JSON **array** of the same email object — up to **100** per request (SDK limit). Each entry is independent; the response returns one result per entry in order.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails/batch \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '[
+    { "to": "success@simulator.amazonses.com", "from": "EverJust <hello@send.everjust.app>", "subject": "First", "text": "One" },
+    { "to": "bounce@simulator.amazonses.com",  "from": "EverJust <hello@send.everjust.app>", "subject": "Second", "text": "Two" }
+  ]'
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+const { data } = await usesend.emails.batch([
+  { to: "success@simulator.amazonses.com", from: "EverJust <hello@send.everjust.app>", subject: "First", text: "One" },
+  { to: "bounce@simulator.amazonses.com",  from: "EverJust <hello@send.everjust.app>", subject: "Second", text: "Two" },
+]);
+
+console.log(data); // [{ emailId }, { emailId }]
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+result = usesend.emails.batch([
+    {"to": "success@simulator.amazonses.com", "from_": "EverJust <hello@send.everjust.app>", "subject": "First", "text": "One"},
+    {"to": "bounce@simulator.amazonses.com",  "from_": "EverJust <hello@send.everjust.app>", "subject": "Second", "text": "Two"},
+])
+```
+
+</Tab>
+</Tabs>
+
+Response:
+
+```json
+{ "data": [ { "emailId": "cuid_a" }, { "emailId": "cuid_b" } ] }
+```
+
+## Scheduling, rescheduling, and cancelling
+
+Set `scheduledAt` (ISO-8601 with an offset) to defer delivery. A scheduled email starts in the `SCHEDULED` status.
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "success@simulator.amazonses.com",
+    "from": "EverJust <hello@send.everjust.app>",
+    "subject": "Your weekly digest",
+    "html": "<p>Here is your digest.</p>",
+    "scheduledAt": "2026-09-08T09:00:00-05:00"
+  }'
+```
+
+**Reschedule** with `PATCH /v1/emails/{emailId}` — `scheduledAt` is required:
+
+```bash
+curl -X PATCH https://mail.everjust.app/api/v1/emails/cuid_abc123 \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "scheduledAt": "2026-09-09T09:00:00-05:00" }'
+```
+
+**Cancel** a scheduled email with `POST /v1/emails/{emailId}/cancel`:
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails/cuid_abc123/cancel \
+  -H "Authorization: Bearer $USESEND_API_KEY"
+```
+
+Both return `{ "emailId": "cuid_abc123" }`.
+
+## Attachments
+
+Provide up to **10** attachments. Each is `{ filename, content }` where `content` is the file bytes encoded as base64. There is no `path` or `contentType` field — inline the base64 content directly.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "success@simulator.amazonses.com",
+    "from": "EverJust <hello@send.everjust.app>",
+    "subject": "Your invoice",
+    "text": "Invoice attached.",
+    "attachments": [
+      { "filename": "invoice.pdf", "content": "JVBERi0xLjQKJ..." }
+    ]
+  }'
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+import { readFileSync } from "node:fs";
+
+const content = readFileSync("invoice.pdf").toString("base64");
+
+await usesend.emails.send({
+  to: "success@simulator.amazonses.com",
+  from: "EverJust <hello@send.everjust.app>",
+  subject: "Your invoice",
+  text: "Invoice attached.",
+  attachments: [{ filename: "invoice.pdf", content }],
+});
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+import base64
+
+with open("invoice.pdf", "rb") as f:
+    content = base64.b64encode(f.read()).decode()
+
+usesend.emails.send({
+    "to": "success@simulator.amazonses.com",
+    "from_": "EverJust <hello@send.everjust.app>",
+    "subject": "Your invoice",
+    "text": "Invoice attached.",
+    "attachments": [{"filename": "invoice.pdf", "content": content}],
+})
+```
+
+</Tab>
+</Tabs>
+
+## Templates
+
+Pass a dashboard-managed `templateId` instead of `subject`/body, and supply `variables` for substitution. Templates are created in the dashboard (no public CRUD endpoint).
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "success@simulator.amazonses.com",
+    "from": "EverJust <hello@send.everjust.app>",
+    "templateId": "tmpl_welcome",
+    "variables": { "firstName": "Ada", "product": "EverJust SEO" }
+  }'
+```
+
+```ts
+await usesend.emails.send({
+  to: "success@simulator.amazonses.com",
+  from: "EverJust <hello@send.everjust.app>",
+  templateId: "tmpl_welcome",
+  variables: { firstName: "Ada", product: "EverJust SEO" },
+});
+```
+
+<Callout type="info">
+The Node SDK also accepts a `react` field (a `ReactElement`) for React Email components, rendered at send time in place of `html`.
+</Callout>
+
+## Reply-To, CC, BCC, and custom headers
+
+`replyTo`, `cc`, and `bcc` each accept a single address or an array. `headers` is a flat string map applied as SMTP headers.
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer $USESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": ["success@simulator.amazonses.com"],
+    "from": "EverJust <hello@send.everjust.app>",
+    "replyTo": "support@send.everjust.app",
+    "cc": ["team@send.everjust.app"],
+    "bcc": ["archive@send.everjust.app"],
+    "subject": "Ticket update",
+    "text": "Your ticket was updated.",
+    "headers": { "X-Entity-Ref-ID": "ticket-4821" }
+  }'
+```
+
+## Threading
+
+Set `inReplyToId` to another useSend `emailId` to thread a message as a reply to it — the instance sets the appropriate `In-Reply-To`/`References` headers.
+
+```ts
+const first = await usesend.emails.send({
+  to: "success@simulator.amazonses.com",
+  from: "EverJust <hello@send.everjust.app>",
+  subject: "Your order #4821",
+  text: "Order received.",
+});
+
+await usesend.emails.send({
+  to: "success@simulator.amazonses.com",
+  from: "EverJust <hello@send.everjust.app>",
+  subject: "Re: Your order #4821",
+  text: "Order shipped.",
+  inReplyToId: first.data?.emailId,
+});
+```
+
+## Email status
+
+Every email carries a `latestStatus` drawn from this enum:
+
+`SCHEDULED`, `QUEUED`, `SENT`, `DELIVERY_DELAYED`, `BOUNCED`, `REJECTED`, `RENDERING_FAILURE`, `DELIVERED`, `OPENED`, `CLICKED`, `COMPLAINED`, `FAILED`, `CANCELLED`, `SUPPRESSED`.
+
+### Fetching status
+
+`GET /v1/emails/{emailId}` returns the email plus its full event history in `emailEvents`, each entry `{ emailId, status, createdAt, data }`.
+
+```bash
+curl https://mail.everjust.app/api/v1/emails/cuid_abc123 \
+  -H "Authorization: Bearer $USESEND_API_KEY"
+```
+
+```json
+{
+  "id": "cuid_abc123",
+  "teamId": "team_everjust",
+  "to": "success@simulator.amazonses.com",
+  "from": "EverJust <hello@send.everjust.app>",
+  "subject": "Welcome to EverJust",
+  "html": "<h1>Welcome</h1>",
+  "text": "Welcome",
+  "createdAt": "2026-09-01T14:00:00.000Z",
+  "updatedAt": "2026-09-01T14:00:05.000Z",
+  "emailEvents": [
+    { "emailId": "cuid_abc123", "status": "QUEUED",    "createdAt": "2026-09-01T14:00:00.000Z", "data": {} },
+    { "emailId": "cuid_abc123", "status": "SENT",      "createdAt": "2026-09-01T14:00:02.000Z", "data": {} },
+    { "emailId": "cuid_abc123", "status": "DELIVERED", "createdAt": "2026-09-01T14:00:05.000Z", "data": {} }
+  ]
+}
+```
+
+To list sent email, use `GET /v1/emails` with `page`, `limit`, `startDate`, `endDate`, and `domainId` query parameters. For push-based delivery of these transitions, configure [Webhooks](/docs/webhooks).
+
+## Errors
+
+Failed requests return the standard error envelope:
+
+```json
+{ "error": { "code": "BAD_REQUEST", "message": "text or html is required" } }
+```
+
+Codes: `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `NOT_UNIQUE` (409), `RATE_LIMITED` (429), `INTERNAL_SERVER_ERROR` (500). Because rate limiting is disabled on this instance, `RATE_LIMITED` is not returned in normal operation.
+
+<Cards>
+  <Card title="Domains" href="/docs/domains">Verify and inspect sending domains.</Card>
+  <Card title="Webhooks" href="/docs/webhooks">Receive delivery, bounce, open, and click events.</Card>
+</Cards>

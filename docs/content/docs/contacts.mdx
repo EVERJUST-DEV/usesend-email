@@ -1,0 +1,361 @@
+---
+title: Contacts & Contact Books
+description: Manage audience lists (contact books) and their contacts for broadcast campaigns on self-hosted useSend.
+---
+
+Contact books are useSend's audience feature: named lists of contacts that [campaigns](/docs/campaigns) send to. A contact book holds many contacts, each with an email, optional name, subscription state, and custom `properties`. Double opt-in is configurable per book.
+
+<Callout type="info">
+Contacts are for **marketing/broadcast** sending only. Transactional sends via [`POST /v1/emails`](/docs/emails) take a raw `to` address and do **not** require a contact or contact book. Reach for this API only when you are building lists for [campaigns](/docs/campaigns).
+</Callout>
+
+All requests use the self-hosted base URL `https://mail.everjust.app/api/v1` and Bearer auth. Rate limiting is disabled on this instance.
+
+```http
+Authorization: Bearer us_xxx
+```
+
+Both `contactBookId` and `contactId` are **strings**. Contacts are nested under a contact book, so contact paths always carry the book id: `/v1/contactBooks/{contactBookId}/contacts/{contactId}`.
+
+## Contact books
+
+### Object shape
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Contact book id. |
+| `name` | string | Display name. |
+| `teamId` | number | Owning team (tenant). |
+| `properties` | object | Custom property schema defined for contacts in this book. |
+| `variables` | object | Variables available to campaigns using this book. |
+| `emoji` | string | Optional emoji shown in the dashboard. |
+| `doubleOptInEnabled` | boolean | When true, new contacts must confirm before becoming subscribed. |
+| `doubleOptInFrom` | string | From address for the confirmation email. |
+| `doubleOptInSubject` | string | Subject of the confirmation email. |
+| `doubleOptInContent` | string | Body of the confirmation email. |
+| `createdAt` | string | ISO-8601 timestamp. |
+| `updatedAt` | string | ISO-8601 timestamp. |
+| `_count` | object | `{ contacts }` — number of contacts in the book. |
+
+### Create a contact book
+
+`POST /v1/contactBooks`
+
+| Body field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | Yes | Display name. |
+| `emoji` | string | No | Dashboard emoji. |
+| `properties` | object | No | Custom property schema. |
+| `doubleOptInEnabled` | boolean | No | Enable double opt-in. |
+| `doubleOptInFrom` | string | No | Confirmation from address. |
+| `doubleOptInSubject` | string | No | Confirmation subject. |
+| `doubleOptInContent` | string | No | Confirmation body. |
+| `variables` | object | No | Campaign variables. |
+
+Returns the created `ContactBook`.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/contactBooks \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Product updates",
+    "emoji": "📣",
+    "doubleOptInEnabled": true,
+    "doubleOptInFrom": "EverJust <hello@send.everjust.app>",
+    "doubleOptInSubject": "Confirm your subscription",
+    "doubleOptInContent": "Click the link to confirm you want product updates."
+  }'
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend("us_xxx", "https://mail.everjust.app/api/v1");
+
+const { data, error } = await usesend.contactBooks.create({
+  name: "Product updates",
+  emoji: "📣",
+  doubleOptInEnabled: true,
+  doubleOptInFrom: "EverJust <hello@send.everjust.app>",
+  doubleOptInSubject: "Confirm your subscription",
+  doubleOptInContent: "Click the link to confirm you want product updates.",
+});
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+from usesend import UseSend
+
+usesend = UseSend("us_xxx", "https://mail.everjust.app/api/v1")
+
+book = usesend.contactBooks.create({
+    "name": "Product updates",
+    "emoji": "📣",
+    "doubleOptInEnabled": True,
+    "doubleOptInFrom": "EverJust <hello@send.everjust.app>",
+    "doubleOptInSubject": "Confirm your subscription",
+    "doubleOptInContent": "Click the link to confirm you want product updates.",
+})
+```
+
+</Tab>
+</Tabs>
+
+### List, get, update, delete
+
+| Method & path | Purpose | Response |
+| --- | --- | --- |
+| `GET /v1/contactBooks` | List all contact books. | Array of `ContactBook`. |
+| `GET /v1/contactBooks/{contactBookId}` | Fetch one book. | `ContactBook`. |
+| `PATCH /v1/contactBooks/{contactBookId}` | Update fields (same body as create, all optional). | `ContactBook`. |
+| `DELETE /v1/contactBooks/{contactBookId}` | Delete a book. | `{ id, success, message }`. |
+
+```bash
+curl https://mail.everjust.app/api/v1/contactBooks \
+  -H "Authorization: Bearer us_xxx"
+```
+
+<Callout type="warn">
+Deleting a contact book removes its contacts as well. There is no soft-delete — the operation is irreversible.
+</Callout>
+
+## Contacts
+
+Contacts live inside a contact book. All paths below are relative to `/v1/contactBooks/{contactBookId}/contacts`.
+
+### Object shape
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Contact id. |
+| `firstName` | string | Optional. |
+| `lastName` | string | Optional. |
+| `email` | string | Contact email address. |
+| `subscribed` | boolean | Subscription state. With double opt-in enabled, new contacts stay unsubscribed until they confirm. |
+| `properties` | object | Custom properties for this contact. |
+| `contactBookId` | string | Parent contact book. |
+| `createdAt` | string | ISO-8601 timestamp. |
+| `updatedAt` | string | ISO-8601 timestamp. |
+
+### Create a contact
+
+`POST /v1/contactBooks/{contactBookId}/contacts`
+
+| Body field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `email` | string | Yes | Contact email. |
+| `firstName` | string | No | |
+| `lastName` | string | No | |
+| `properties` | object | No | Custom properties. |
+| `subscribed` | boolean | No | Initial subscription state. |
+
+Returns `{ contactId }`.
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+curl -X POST https://mail.everjust.app/api/v1/contactBooks/cb_123/contacts \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "ada@example.com",
+    "firstName": "Ada",
+    "lastName": "Lovelace",
+    "subscribed": true,
+    "properties": { "plan": "pro" }
+  }'
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+const { data } = await usesend.contacts.create("cb_123", {
+  email: "ada@example.com",
+  firstName: "Ada",
+  lastName: "Lovelace",
+  subscribed: true,
+  properties: { plan: "pro" },
+});
+// data => { contactId: "..." }
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+result = usesend.contacts.create("cb_123", {
+    "email": "ada@example.com",
+    "firstName": "Ada",
+    "lastName": "Lovelace",
+    "subscribed": True,
+    "properties": {"plan": "pro"},
+})
+# result => { "contactId": "..." }
+```
+
+</Tab>
+</Tabs>
+
+### List contacts
+
+`GET /v1/contactBooks/{contactBookId}/contacts`
+
+| Query param | Type | Notes |
+| --- | --- | --- |
+| `emails` | string | Comma-separated list of emails to filter by. |
+| `ids` | string | Comma-separated list of contact ids. |
+| `page` | number | Page number (default 1). |
+| `limit` | number | Page size (default 50). |
+
+Returns an array of `Contact`.
+
+```bash
+curl "https://mail.everjust.app/api/v1/contactBooks/cb_123/contacts?page=1&limit=50" \
+  -H "Authorization: Bearer us_xxx"
+```
+
+### Get, update, upsert, delete
+
+| Method & path | Purpose | Body | Response |
+| --- | --- | --- | --- |
+| `GET …/contacts/{contactId}` | Fetch one contact. | — | `Contact`. |
+| `PATCH …/contacts/{contactId}` | Update fields. | `firstName`, `lastName`, `properties`, `subscribed` | `{ contactId }`. |
+| `PUT …/contacts/{contactId}` | Upsert by id. | `email` (required), plus any updatable fields | `{ contactId }`. |
+| `DELETE …/contacts/{contactId}` | Delete a contact. | — | `{ success }`. |
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+# Unsubscribe a contact
+curl -X PATCH https://mail.everjust.app/api/v1/contactBooks/cb_123/contacts/ct_456 \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{ "subscribed": false }'
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+await usesend.contacts.update("cb_123", "ct_456", { subscribed: false });
+
+// Upsert (PUT) — email is required
+await usesend.contacts.upsert("cb_123", "ct_456", {
+  email: "ada@example.com",
+  subscribed: true,
+});
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+usesend.contacts.update("cb_123", "ct_456", {"subscribed": False})
+
+# Upsert (PUT) — email is required
+usesend.contacts.upsert("cb_123", "ct_456", {
+    "email": "ada@example.com",
+    "subscribed": True,
+})
+```
+
+</Tab>
+</Tabs>
+
+### Bulk add and delete
+
+For importing or removing many contacts at once:
+
+| Method & path | Body | Response |
+| --- | --- | --- |
+| `POST …/contacts/bulk` | JSON **array** of contact objects (same fields as create). | `{ message, count }`. |
+| `DELETE …/contacts/bulk` | `{ contactIds: string[] }`. | `{ success, count }`. |
+
+<Tabs items={['cURL','Node','Python']}>
+<Tab value="cURL">
+
+```bash
+# Bulk add
+curl -X POST https://mail.everjust.app/api/v1/contactBooks/cb_123/contacts/bulk \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '[
+    { "email": "grace@example.com", "firstName": "Grace", "subscribed": true },
+    { "email": "alan@example.com", "firstName": "Alan", "subscribed": true }
+  ]'
+
+# Bulk delete
+curl -X DELETE https://mail.everjust.app/api/v1/contactBooks/cb_123/contacts/bulk \
+  -H "Authorization: Bearer us_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{ "contactIds": ["ct_456", "ct_789"] }'
+```
+
+</Tab>
+<Tab value="Node">
+
+```ts
+await usesend.contacts.bulkCreate("cb_123", [
+  { email: "grace@example.com", firstName: "Grace", subscribed: true },
+  { email: "alan@example.com", firstName: "Alan", subscribed: true },
+]);
+
+await usesend.contacts.bulkDelete("cb_123", {
+  contactIds: ["ct_456", "ct_789"],
+});
+```
+
+</Tab>
+<Tab value="Python">
+
+```python
+usesend.contacts.bulk_create("cb_123", [
+    {"email": "grace@example.com", "firstName": "Grace", "subscribed": True},
+    {"email": "alan@example.com", "firstName": "Alan", "subscribed": True},
+])
+
+usesend.contacts.bulk_delete("cb_123", {
+    "contactIds": ["ct_456", "ct_789"],
+})
+```
+
+</Tab>
+</Tabs>
+
+## Double opt-in
+
+When `doubleOptInEnabled` is true on a contact book, useSend sends a confirmation email to newly added contacts using the book's `doubleOptInFrom`, `doubleOptInSubject`, and `doubleOptInContent`. A contact remains `subscribed: false` until they confirm.
+
+<Callout type="info">
+The double opt-in email is a normal send through Amazon SES. While this instance's SES is in **sandbox**, confirmation emails only reach verified addresses or the SES mailbox simulator — so opt-in flows for arbitrary recipients will not complete until AWS grants production access. See [Sending email](/docs/emails) for the sandbox details.
+</Callout>
+
+## Errors
+
+Errors use the standard envelope:
+
+```json
+{ "error": { "code": "NOT_FOUND", "message": "Contact not found" } }
+```
+
+Common codes for this API: `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `NOT_UNIQUE` (409 — e.g. duplicate email in a book), `INTERNAL_SERVER_ERROR` (500).
+
+## Next steps
+
+<Cards>
+  <Card title="Campaigns" href="/docs/campaigns">Send a broadcast to a contact book.</Card>
+  <Card title="Sending email" href="/docs/emails">Transactional sends — no contacts required.</Card>
+  <Card title="Webhooks" href="/docs/webhooks">Subscribe to contact.created / updated / deleted events.</Card>
+</Cards>

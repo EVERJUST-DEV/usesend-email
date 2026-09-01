@@ -25,19 +25,33 @@ usesend-email/
 │   ├── alb.tf ecs.tf iam.tf secrets.tf
 │   ├── variables.tf outputs.tf versions.tf
 │   └── terraform.tfvars.example
+├── mcp/                      # useSend MCP server — agents send mail via MCP
 ├── scripts/
 │   └── add-tenant-dns.sh     # publish a product's DKIM/SPF/DMARC into Route 53
-└── docs/
-    ├── runbook.md            # SES production access, deploy, scaling, backups
-    ├── onboard-a-product.md  # add a product = a Team + domain(s) + API key
-    └── isolation-tests.md    # Phase 4 cross-tenant tests (GATING)
+├── docs/                     # Fumadocs docs site → GitHub Pages (auto-deployed)
+│   └── content/docs/*.mdx    # overview, quickstart, API, webhooks, MCP, ops, …
+└── .github/workflows/docs.yml
 ```
+
+## Documentation
+
+Full product docs live in [`docs/`](docs/content/docs/) (a Fumadocs site) and are
+built + deployed to **GitHub Pages** by [`.github/workflows/docs.yml`](.github/workflows/docs.yml)
+on every push that touches `docs/` — so they stay in sync with the repo. The
+[`mcp/`](mcp/) directory is a Model Context Protocol server that lets AI agents
+send mail and manage the account; see [`docs/content/docs/mcp.mdx`](docs/content/docs/mcp.mdx)
+and [`mcp/README.md`](mcp/README.md). A machine-readable index for agents is at
+[`docs/public/llms.txt`](docs/public/llms.txt).
+
+> Private-repo GitHub Pages needs a paid plan. Until it's enabled, the workflow's
+> **build** job still validates the docs on every push; read the pages as MDX in
+> `docs/content/docs/`, or run the site locally (`cd docs && npm install && npm run dev`).
 
 ## What gets provisioned (AWS)
 
 | Layer | Resource |
 |-------|----------|
-| Network | VPC, 2 public + 2 private subnets, IGW, NAT |
+| Network | VPC, 2 public + 2 private subnets, IGW (Fargate egresses via public IP — no NAT gateway, since the account was at its Elastic IP cap; inbound still locked to the ALB by security group) |
 | Compute | ECS Fargate cluster + 1 service (single useSend container; workers run in-process) |
 | Ingress | Application Load Balancer + ACM TLS cert, HTTP→HTTPS redirect |
 | Data | RDS PostgreSQL 16 (Multi-AZ), ElastiCache Redis 7 |
@@ -46,9 +60,10 @@ usesend-email/
 | DNS/TLS | Route 53 records + ACM DNS validation (optional; or bring your own cert) |
 | Delivery | Amazon SES — configuration sets + SNS wiring are created **by useSend at runtime**, not Terraform |
 
-**Rough cost floor:** a few hundred USD/month (Fargate + Multi-AZ RDS + Redis +
-NAT + ALB), plus SES at ~$0.10 per 1,000 emails. Domains are free. Trim by
-setting `db_multi_az=false` and `nat_per_az=false` for non-prod.
+**Rough cost floor:** the shipped `terraform.tfvars` is cost-optimized
+(single-AZ RDS, one Fargate task, no NAT) at ~**$65–80/month** — Fargate + RDS +
+Redis + ALB — plus SES at ~$0.10 per 1,000 emails. Domains are free. Set
+`db_multi_az=true` and raise `app_desired_count` for a production HA posture.
 
 ---
 
@@ -74,7 +89,7 @@ hosted zone**, and a **GitHub OAuth App**.
 **1. Start the slow thing first — SES production access.** It's human-reviewed
 (24–48h). AWS console → SES → *Account dashboard* → **Request production
 access**, and request a sending-quota increase. Details in
-[`docs/runbook.md`](docs/runbook.md).
+[`docs/content/docs/operations.mdx`](docs/content/docs/operations.mdx).
 
 **2. Create a GitHub OAuth App** (self-host login). Callback URL:
 `https://<app_domain>/api/auth/callback/github`. Keep the client ID + secret.
@@ -99,10 +114,10 @@ otherwise create a record for `app_domain` → the `alb_dns_name` output. Then:
   creates the SES configuration set + SNS subscription for you.
 
 **5. Onboard your products.** One Team + domain(s) + API key per product —
-see [`docs/onboard-a-product.md`](docs/onboard-a-product.md).
+see [`docs/content/docs/onboard-a-product.mdx`](docs/content/docs/onboard-a-product.mdx).
 
 **6. Before co-hosting unrelated products,** run the cross-tenant isolation
-tests — [`docs/isolation-tests.md`](docs/isolation-tests.md). This is a gate,
+tests — [`docs/content/docs/tenant-isolation.mdx`](docs/content/docs/tenant-isolation.mdx). This is a gate,
 not optional: useSend is beta and isolation is app-layer.
 
 ---
@@ -122,7 +137,7 @@ each product's deliverability looks good.
   Get legal sign-off before forking. (Postal is the MIT alternative if this is a
   dealbreaker — see the decision brief.)
 - **Beta + app-layer isolation.** Pin `usesend_image` to a version tag (not
-  `:latest`) and run `docs/isolation-tests.md` after every upgrade.
+  `:latest`) and run `docs/content/docs/tenant-isolation.mdx` after every upgrade.
 - **Shared SES reputation by default.** All Teams share the SES account's
   quota/reputation until you give high-volume products their own SES
   configuration set + dedicated IP pool.

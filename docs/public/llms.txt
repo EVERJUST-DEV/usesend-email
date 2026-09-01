@@ -1,0 +1,53 @@
+# useSend — EverJust transactional email
+
+> Self-hosted, multi-tenant transactional email for EverJust products, running on
+> Amazon SES (open-source useSend). One deployment; a Team is a tenant (one per
+> product) with its own sending domains and API keys. Replaces Resend with $0
+> per-domain cost — SES bills per email, not per domain.
+
+Instance: https://mail.everjust.app
+API base (self-hosted): https://mail.everjust.app/api/v1
+Auth: HTTP Bearer — `Authorization: Bearer us_...` (create keys in a Team's Developer settings)
+Rate limiting: disabled on self-hosted
+Note: SES is in sandbox until AWS grants production access — until then send only to verified addresses or the SES mailbox simulator (success@simulator.amazonses.com).
+
+## Sending (most common)
+
+- POST /v1/emails — send one. Body: to (required), from (required), subject (or templateId), html and/or text, plus cc, bcc, replyTo, headers, attachments ({filename, content:base64}, max 10), scheduledAt (ISO-8601), inReplyToId, variables. Optional header `Idempotency-Key`. Response: {"emailId": "..."}.
+- POST /v1/emails/batch — body is a JSON array of email objects (max 100).
+- GET /v1/emails/{emailId} — status + delivery events (emailEvents[].status: SENT, DELIVERED, BOUNCED, COMPLAINED, OPENED, CLICKED, ...).
+- PATCH /v1/emails/{emailId} {scheduledAt} — reschedule. POST /v1/emails/{emailId}/cancel — cancel.
+
+## Other resources
+
+- Domains: POST/GET /v1/domains, GET/PUT verify/DELETE /v1/domains/{id} (id is numeric; region must match SES settings).
+- Contacts: /v1/contactBooks and /v1/contactBooks/{id}/contacts (CRUD + /bulk) — for broadcast lists, not needed for transactional.
+- Campaigns (broadcasts): /v1/campaigns (create/list/get/delete, schedule/pause/resume).
+- Analytics: GET /v1/analytics/email-time-series, GET /v1/analytics/reputation-metrics.
+- Templates, suppressions, webhook config, and API-key creation are dashboard-only (not REST).
+
+## For AI agents
+
+- MCP server (recommended): a stdio MCP server exposing all of the above as tools (send_email, send_batch, get_email, domains, contacts, campaigns, analytics). Configure with env USESEND_API_KEY and USESEND_BASE_URL=https://mail.everjust.app/api/v1. See /docs/mcp.
+- Use the `Idempotency-Key` header on send so a retried agent step never double-sends.
+
+## Docs
+
+- Overview: /docs
+- Quickstart: /docs/quickstart
+- Onboard a product: /docs/onboard-a-product
+- API reference: /docs/api
+- Sending email: /docs/sending-email
+- Domains: /docs/domains
+- Contacts: /docs/contacts
+- Webhooks: /docs/webhooks
+- Migrate from Resend: /docs/migrate-from-resend
+- SMTP relay: /docs/smtp
+- MCP server: /docs/mcp
+- useSend for AI agents: /docs/ai-agents
+- Architecture (AWS): /docs/architecture
+- Operations & runbook: /docs/operations
+- Tenant isolation: /docs/tenant-isolation
+- Troubleshooting: /docs/troubleshooting
+
+Source & infrastructure (Terraform + MCP server + these docs): https://github.com/EVERJUST-DEV/usesend-email

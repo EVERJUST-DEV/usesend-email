@@ -1,0 +1,118 @@
+---
+title: Overview
+description: EverJust's self-hosted, multi-tenant transactional email platform on AWS SES — a drop-in replacement for Resend that costs $0 per sending domain.
+---
+
+useSend is EverJust's self-hosted transactional email platform. It is the open-source [useSend](https://github.com/usesend/useSend) project (formerly Unsend) running on our own AWS account, sending through **Amazon SES**. We run it to replace Resend across every EverJust product.
+
+The dashboard is live at **[mail.everjust.app](https://mail.everjust.app)** and the REST API is served from **`https://mail.everjust.app/api/v1`**.
+
+## Why we run it
+
+- **$0 per sending domain.** SES bills per email (~$0.10 per 1,000), never per domain. Add as many verified domains as products need at no marginal cost — the opposite of Resend's per-domain pricing.
+- **Self-hosted, one AWS account.** All email flows through infrastructure we own. No third-party sees the message bodies, and there is no external quota to buy.
+- **Near drop-in for Resend.** The send payload mirrors Resend's (`from` / `to` / `subject` / `html` / `text`), so migrating a product is mostly a base-URL and API-key swap. See [Migrate from Resend](/docs/migrate-from-resend).
+- **Multi-tenant by design.** One deployment serves every product, each isolated into its own tenant.
+
+## Tenancy model
+
+There is **one useSend deployment** for all of EverJust. Within it:
+
+- A **Team is a tenant**, and there is **one Team per product**.
+- Each Team owns its own **sending domains** and its own **API keys**. A key is scoped to its Team — it can only send from that Team's domains and only sees that Team's data.
+- Adding a new product means creating a new Team, verifying its domain(s), and issuing a key for it. Nothing is shared at the application layer between Teams.
+
+```text
+useSend deployment  (mail.everjust.app)
+├── Team "EverJust"        ← tenant = product
+│   ├── domain: send.everjust.app   (verified)
+│   └── API key: us_...             (Bearer)
+├── Team "ProductB"
+│   ├── domain: mail.productb.com
+│   └── API key: us_...
+└── Team "ProductC" …
+```
+
+## What's already live
+
+<Steps>
+  <Step>The deployment is running — dashboard at [mail.everjust.app](https://mail.everjust.app), API at `https://mail.everjust.app/api/v1`.</Step>
+  <Step>Team **EverJust** exists as the first tenant.</Step>
+  <Step>Sending domain **`send.everjust.app`** is fully verified — DKIM, SPF, DMARC, and MAIL FROM all pass.</Step>
+  <Step>An API key with the **`us_`** prefix is issued for the EverJust Team.</Step>
+</Steps>
+
+Authentication is HTTP Bearer. Every API request carries the key in the header, exactly:
+
+```http
+Authorization: Bearer us_xxxxxxxxxxxxxxxxxxxx
+```
+
+Because we self-host, **rate limiting is disabled** — there is no per-second or per-day API cap imposed by useSend. Throughput is bounded only by your SES sending quota.
+
+<Callout type="warn">
+  **SES is in sandbox.** Production access has been requested from AWS but is still pending. Until it's granted, you can only send to **verified addresses** or the SES **mailbox simulator** — `success@simulator.amazonses.com`, `bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`. Once AWS grants production access, any recipient works with no code change.
+</Callout>
+
+## A first send
+
+<Tabs items={['cURL','Node','Python']}>
+  <Tab value="cURL">
+```bash
+curl -X POST https://mail.everjust.app/api/v1/emails \
+  -H "Authorization: Bearer us_xxxxxxxxxxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Hello from useSend",
+    "html": "<p>It works.</p>"
+  }'
+```
+  </Tab>
+  <Tab value="Node">
+```ts
+import { UseSend } from "usesend-js";
+
+const usesend = new UseSend(
+  "us_xxxxxxxxxxxxxxxxxxxx",
+  "https://mail.everjust.app/api/v1"
+);
+
+await usesend.emails.send({
+  from: "EverJust <hello@send.everjust.app>",
+  to: "success@simulator.amazonses.com",
+  subject: "Hello from useSend",
+  html: "<p>It works.</p>",
+});
+```
+  </Tab>
+  <Tab value="Python">
+```python
+from usesend import UseSend
+
+usesend = UseSend(
+    api_key="us_xxxxxxxxxxxxxxxxxxxx",
+    url="https://mail.everjust.app/api/v1",
+)
+
+usesend.emails.send({
+    "from": "EverJust <hello@send.everjust.app>",
+    "to": "success@simulator.amazonses.com",
+    "subject": "Hello from useSend",
+    "html": "<p>It works.</p>",
+})
+```
+  </Tab>
+</Tabs>
+
+## Where to go next
+
+<Cards>
+  <Card title="Quickstart" href="/docs/quickstart">Send your first email with the existing EverJust key in a few minutes.</Card>
+  <Card title="Onboard a product" href="/docs/onboard-a-product">Stand up a new tenant — a Team, its sending domain(s), and an API key.</Card>
+  <Card title="API reference" href="/docs/api">Endpoints, request and response fields, and authentication details.</Card>
+  <Card title="Migrate from Resend" href="/docs/migrate-from-resend">Swap base URL and key, port templates, and shadow-send before cutover.</Card>
+  <Card title="MCP server" href="/docs/mcp">Drive useSend from AI agents through the Model Context Protocol server.</Card>
+  <Card title="Architecture" href="/docs/architecture">The AWS stack — ECS, RDS, Redis, ALB — and how mail flows through SES.</Card>
+</Cards>

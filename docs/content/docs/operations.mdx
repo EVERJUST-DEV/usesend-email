@@ -1,0 +1,136 @@
+---
+title: Operations & Runbook
+description: Practical procedures for deploying, updating, monitoring, scaling, and backing up the self-hosted useSend instance on AWS.
+---
+
+Operational reference for running EverJust's useSend instance. All infrastructure is Terraform in the [usesend-email](https://github.com/EVERJUST-DEV/usesend-email) repo (`terraform/`), running as an ECS service backed by RDS and Amazon SES.
+
+<Callout type="warn">
+**Clock skew breaks the AWS CLI.** The deploy machine's clock was observed ~2h ahead of AWS. AWS SigV4 rejects requests whose signature timestamp drifts too far from server time, so `terraform` and `aws` calls fail with `SignatureDoesNotMatch` / `RequestExpired`. Sync the system clock (enable NTP) before running any AWS-authenticated command, or use a client that corrects for skew. This is not a credentials problem — the fix is the clock.
+</Callout>
+
+## Prerequisites
+
+- AWS credentials configured for the target account (`aws sts get-caller-identity` should succeed).
+- Terraform installed, matching the version pinned in `terraform/`.
+- A correct system clock (see warning above).
+
+`terraform.tfvars` is **gitignored** — it holds environment-specific values and is not in the repo. Retrieve it from the operator vault before planning, or `plan` will prompt for required variables.
+
+## Deploying & updating infrastructure
+
+All infra changes go through Terraform. Never mutate ECS, RDS, or SES resources by hand in the console — drift will be reverted on the next apply.
+
+<Steps>
+<Step>
+Enter the Terraform directory.
+
+```bash
+cd terraform
+```
+</Step>
+<Step>
+Review the plan. Read every change before applying — especially anything that says `destroy` or `replace`.
+
+```bash
+terraform plan
+```
+</Step>
+<Step>
+Apply once the plan matches intent.
+
+```bash
+terraform apply
+```
+</Step>
+</Steps>
+
+## Updating the useSend container image
+
+The running application version is controlled by the `usesend_image` variable.
+
+<Steps>
+<Step>
+Bump `var.usesend_image` to the new image tag (in `terraform.tfvars` or your var source).
+</Step>
+<Step>
+Re-apply. Changing the image forces a new ECS task definition and triggers a rolling deployment.
+
+```bash
+cd terraform
+terraform apply
+```
+</Step>
+<Step>
+Database migrations run **automatically at container boot** via `prisma migrate deploy`. No manual migration step is required — watch the CloudWatch logs to confirm they applied cleanly.
+</Step>
+</Steps>
+
+<Callout type="info">
+ECS performs a rolling replacement, so the old tasks keep serving until the new ones pass health checks. If a new image fails to boot (e.g. a migration error), the old tasks stay up and the deployment stalls rather than taking the service down.
+</Callout>
+
+## SES production access
+
+The AWS account's SES is currently in **sandbox mode**. Production access has been **requested and is pending**.
+
+While in sandbox:
+
+- You can only send to **verified addresses** or the SES **mailbox simulator**: `success@simulator.amazonses.com`, `bounce@simulator.amazonses.com`, `complaint@simulator.amazonses.com`.
+- The daily sending quota is **200 messages/day**.
+
+Once AWS grants production access, useSend can send to **any recipient** and the quota lifts to the account's production limits. Check the request status in the SES console under **Account dashboard → Sending statistics**.
+
+<Callout type="info">
+Rate limiting is **disabled** in useSend itself on this self-hosted instance — the only send limits that apply are SES's own account quotas (sandbox: 200/day) and its per-second send rate.
+</Callout>
+
+## Monitoring bounce & complaint rates
+
+SES enforces reputation thresholds account-wide. Exceeding them risks a sending pause or account review, so watch these actively.
+
+| Metric | Keep below | Where to check |
+| --- | --- | --- |
+| Bounce rate | 5% | Dashboard analytics + CloudWatch (SES reputation metrics) |
+| Complaint rate | 0.1% | Dashboard analytics + CloudWatch (SES reputation metrics) |
+
+- The useSend **dashboard analytics** at [mail.everjust.app](https://mail.everjust.app) show per-domain delivery, bounce, and complaint counts.
+- CloudWatch surfaces the SES account-level `Reputation.BounceRate` and `Reputation.ComplaintRate` metrics — set alarms on these.
+
+**Suppression is automatic.** SES publishes bounce and complaint notifications to SNS, which useSend consumes and uses to suppress future sends to those addresses. No manual list maintenance is needed; verify the SES → SNS → useSend path is intact if suppression stops working.
+
+## Scaling
+
+<Accordions>
+<Accordion title="Application (ECS) capacity">
+Adjust `var.app_desired_count` to change how many ECS tasks run, then `terraform apply`. More tasks = more concurrent API/dashboard throughput.
+</Accordion>
+<Accordion title="Database high availability">
+Flip `var.db_multi_az = true` and apply to run RDS in Multi-AZ mode with a standby in a second availability zone for automatic failover. This increases cost and is off by default.
+</Accordion>
+</Accordions>
+
+## Backups & data protection
+
+- **RDS automated backups** are enabled, with **point-in-time recovery (PITR)** — restore to any moment within the retention window.
+- **Deletion protection is ON** for the database. A `terraform destroy` will not tear down RDS until deletion protection is deliberately disabled first. This is intentional friction to prevent accidental data loss — treat any teardown as a two-step, reviewed operation.
+
+## Secrets & logs
+
+- **Secrets** (database credentials, SES keys, app secrets) live in **AWS Secrets Manager** and are injected into the ECS task at runtime. Do not hardcode them into Terraform or commit them.
+- **Application logs** stream to CloudWatch Logs under the log group **`/ecs/usesend`**. Start here for boot/migration output, send errors, and SNS webhook processing.
+
+```bash
+aws logs tail /ecs/usesend --follow
+```
+
+<Callout type="info">
+If `aws logs tail` fails with a signature or expiry error, check the machine clock first (see the warning at the top of this page).
+</Callout>
+
+## Related
+
+<Cards>
+<Card title="Getting Started" href="/docs/getting-started">Base URL, auth, and your first send.</Card>
+<Card title="Domains" href="/docs/domains">Verifying sending domains and DNS records.</Card>
+</Cards>

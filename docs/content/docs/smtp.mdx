@@ -1,0 +1,147 @@
+---
+title: SMTP Relay
+description: Send through useSend from any app that speaks SMTP, using the optional smtp-proxy container that forwards to the instance API.
+---
+
+useSend ships an optional **SMTP proxy** — the Docker image `usesend/smtp-proxy` — that accepts standard SMTP connections and forwards each message to the useSend instance API. Use it for frameworks and apps that only speak SMTP: Nodemailer, Supabase Auth, Django, Rails, WordPress, and similar.
+
+The proxy is a thin translator. It does not touch SES directly — it authenticates the SMTP session, then calls the same `POST /api/v1/emails` endpoint the [Send Email](/docs/send-email) API uses. Everything downstream (domain verification, DKIM/SPF/DMARC, SES sending) is identical to the API path.
+
+<Callout type="warn">
+For most EverJust products, prefer the HTTP API over SMTP. The API is simpler to secure, easier to observe, and avoids the port-25 pitfalls below. Reach for SMTP only when a third-party app cannot be configured to call an HTTP API.
+</Callout>
+
+## How it works
+
+<Steps>
+<Step>
+Your app opens an SMTP connection to the proxy and authenticates with username `usesend` and a useSend API key (the `us_` value) as the password.
+</Step>
+<Step>
+The proxy validates the credentials and reads the message (envelope, headers, body, attachments).
+</Step>
+<Step>
+The proxy calls the useSend instance API at `USESEND_BASE_URL` to enqueue the send. The email is delivered through Amazon SES exactly as an API-submitted message would be.
+</Step>
+</Steps>
+
+## Running the proxy
+
+The proxy is **separate infrastructure** from the main useSend deployment. Run it as its own container and point it at the instance base URL.
+
+```bash
+docker run -d \
+  --name usesend-smtp-proxy \
+  -e USESEND_BASE_URL=https://mail.everjust.app \
+  -e SMTP_AUTH_USERNAME=usesend \
+  -p 25:25 \
+  -p 587:587 \
+  -p 2587:2587 \
+  -p 465:465 \
+  -p 2465:2465 \
+  usesend/smtp-proxy
+```
+
+- `USESEND_BASE_URL` — the useSend instance the proxy forwards to. For EverJust this is `https://mail.everjust.app`.
+- `SMTP_AUTH_USERNAME` — the fixed SMTP username clients must present. Set to `usesend`.
+
+The API key is **not** configured on the proxy. Each client supplies its own `us_` key as the SMTP password, so a single proxy can serve any Team on the instance.
+
+<Callout type="warn">
+The proxy must be network-reachable from whatever app connects to it. If you deploy it behind a firewall or in a private subnet, ensure the SMTP ports are open to your app. This is a distinct service from `https://mail.everjust.app` and has its own uptime.
+</Callout>
+
+## Ports
+
+| Port | Transport | Notes |
+|------|-----------|-------|
+| 25   | STARTTLS  | Standard SMTP. Often blocked outbound — see below. |
+| 587  | STARTTLS  | Standard submission port. Preferred for STARTTLS. |
+| 2587 | STARTTLS  | Alternate submission port for hosts that block 587. |
+| 465  | Implicit TLS | TLS negotiated at connection (SMTPS). |
+| 2465 | Implicit TLS | Alternate implicit-TLS port. |
+
+Choose **implicit TLS (465 / 2465)** or **STARTTLS (587 / 2587)** based on what your client library supports. The `2xxx` variants exist so the proxy can run somewhere that already occupies the standard ports.
+
+<Callout type="error">
+AWS blocks outbound TCP port **25** by default on EC2 and Lambda. If your sending app runs on AWS, connecting to the proxy on port 25 will time out. Use 587/2587 (STARTTLS) or 465/2465 (implicit TLS) instead — and for AWS-hosted senders, the [HTTP API](/docs/send-email) avoids the problem entirely.
+</Callout>
+
+## Credentials
+
+| Setting  | Value |
+|----------|-------|
+| Host     | your proxy host (e.g. `smtp.everjust.app`) |
+| Port     | `587` or `2587` (STARTTLS), `465` or `2465` (implicit TLS) |
+| Username | `usesend` |
+| Password | a useSend API key, e.g. `us_xxx` |
+
+Treat the API key as a secret — it grants the same sending rights as the HTTP API. Use a per-product key from the product's own Team so sends are correctly attributed and revocable.
+
+<Callout type="info">
+Self-hosted useSend has **rate limiting disabled**, so the proxy will not throttle submissions. Throughput is bounded by your SES account limits. Note also that SES is currently in **sandbox**: you can only send to verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@`, `complaint@`) until AWS grants production access.
+</Callout>
+
+## Nodemailer example
+
+```ts
+import nodemailer from "nodemailer";
+
+const transporter = nodemailer.createTransport({
+  host: "smtp.everjust.app",
+  port: 465,          // implicit TLS
+  secure: true,       // true for 465, false for 587/2587 (STARTTLS)
+  auth: {
+    user: "usesend",
+    pass: process.env.USESEND_API_KEY, // us_xxx
+  },
+});
+
+await transporter.sendMail({
+  from: "EverJust <hello@send.everjust.app>",
+  to: "success@simulator.amazonses.com", // verified address while in sandbox
+  subject: "Hello from useSend SMTP",
+  text: "Sent through the useSend SMTP proxy.",
+  html: "<p>Sent through the useSend SMTP proxy.</p>",
+});
+```
+
+For STARTTLS on port 587 (or 2587), set `port: 587` and `secure: false` — Nodemailer will upgrade the connection with STARTTLS automatically.
+
+## Generic SMTP settings
+
+Any SMTP-capable app (Django's `EMAIL_*` settings, Rails Action Mailer, Supabase custom SMTP, WordPress plugins, etc.) can be pointed at the proxy with these values:
+
+```
+Host:            smtp.everjust.app
+Port (STARTTLS): 587  (or 2587)
+Port (TLS):      465  (or 2465)
+Encryption:      STARTTLS  or  SSL/TLS  (match the port)
+Username:        usesend
+Password:        us_xxx           # your useSend API key
+From address:    hello@send.everjust.app   # must be on a verified domain
+```
+
+The `From` address must use a verified sending domain on the Team the API key belongs to — for EverJust, `send.everjust.app`. Sends from unverified domains are rejected.
+
+## Troubleshooting
+
+<Accordions>
+<Accordion title="Connection times out on port 25">
+Port 25 is blocked outbound by AWS (and many networks) by default. Switch to 587/2587 (STARTTLS) or 465/2465 (implicit TLS). If your sender runs on AWS, prefer the HTTP API.
+</Accordion>
+<Accordion title="Authentication failed">
+The username must be exactly `usesend` and the password must be a valid `us_` API key from a Team on this instance. Confirm the key has not been revoked and that you are connecting to the proxy, not directly to `mail.everjust.app`.
+</Accordion>
+<Accordion title="Message accepted but not delivered">
+While SES is in sandbox, delivery only succeeds to verified addresses or the mailbox simulator. Check that the recipient is verified, and that the From domain is `send.everjust.app` (or another verified domain on the Team).
+</Accordion>
+<Accordion title="TLS / certificate errors">
+Ensure `secure`/encryption matches the port: implicit TLS for 465/2465, STARTTLS for 587/2587. Do not enable implicit TLS on a STARTTLS port or vice versa.
+</Accordion>
+</Accordions>
+
+<Cards>
+<Card title="Send Email (API)" href="/docs/send-email">The HTTP path — preferred for AWS-hosted senders and new integrations.</Card>
+<Card title="Domains" href="/docs/domains">Verify sending domains and check DKIM/SPF/DMARC status.</Card>
+</Cards>

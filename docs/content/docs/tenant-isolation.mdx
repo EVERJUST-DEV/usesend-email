@@ -1,0 +1,100 @@
+---
+title: Tenant Isolation
+description: How useSend scopes every resource to a Team, why isolation is application-layer, and how to test and harden it before co-hosting products.
+---
+
+useSend is multi-tenant. In this deployment, one AWS install of useSend serves every EverJust product, and a **Team** is the tenant boundary. Each product gets its own Team; a Team owns its sending domains, API keys, templates, contacts, and email logs, and nothing crosses that line under normal operation.
+
+## The model
+
+Every resource in useSend belongs to exactly one Team:
+
+- **Domains** — verified sending domains (e.g. `send.everjust.app`) are registered under a Team.
+- **API keys** — the `us_` prefixed keys are minted inside a Team. An API key resolves to **exactly one Team**; there is no cross-Team key.
+- **Templates, contacts, contact books** — created and read within a Team.
+- **Emails & logs** — send records, delivery events, and suppression entries are Team-scoped.
+
+When a request arrives with `Authorization: Bearer us_xxx`, useSend maps that key to its Team and constrains the operation to that Team's resources. A key for the EverJust Team can only send from EverJust's verified domains and can only read EverJust's logs.
+
+<Callout type="info">
+One product = one Team. Do not share a single Team (or its API keys) across two products. Sharing a Team collapses the isolation boundary — separate the tenants first, then isolate reputation (below).
+</Callout>
+
+## Isolation is application-layer
+
+This is the important caveat. Tenant isolation in useSend is enforced **in application code** — every query is expected to filter by the caller's Team id. There is **no database row-level security**: the isolation guarantee is only as strong as the correctness of those query filters.
+
+useSend (formerly Unsend) is **beta** software with a history of patched team-scoping bugs — cases where an endpoint failed to constrain a query by Team, exposing or acting on another tenant's data. That history is not a reason to avoid useSend; it is a reason to **treat cross-tenant isolation as something you verify, not something you assume**, especially before you co-host unrelated commercial products that must not see each other's data.
+
+<Callout type="warn">
+Pin the exact useSend version you tested. Every upgrade can change query paths — re-run the full isolation test suite below after any version bump before it reaches production.
+</Callout>
+
+## Before co-hosting: run isolation tests
+
+Provision two Teams — call them **Team A** and **Team B** — each with its own domain, API key, a template, and a contact. Then, using **only Team A's key**, confirm that every attempt to touch Team B's resources fails (401/403/404, never success or another tenant's data).
+
+<Steps>
+
+<Step>
+**Send-as isolation.** With Team A's key, attempt to send from Team B's verified domain (e.g. `from: noreply@teamb-domain.example`). It must be rejected — Team A's key may only send from Team A's domains.
+</Step>
+
+<Step>
+**Log isolation.** List and fetch emails with Team A's key. Confirm the response contains only Team A's sends and never surfaces a Team B email, delivery event, or recipient.
+</Step>
+
+<Step>
+**Domain isolation.** List domains with Team A's key. Only Team A's domains appear. Then fetch Team B's domain id directly and confirm it is not readable.
+</Step>
+
+<Step>
+**Template & contact isolation.** List templates and contact books with Team A's key; only Team A's appear. Team B's template and contact book must not be enumerable.
+</Step>
+
+<Step>
+**Cross-team IDOR (the critical test).** Take a real **email id** and **contact id** from Team B and request them directly with Team A's key — GET the email, GET/PATCH/DELETE the contact, GET the template by id. Each must return not-found or forbidden. An endpoint that returns Team B's object here is a scoping bug: **stop and do not co-host until it is fixed.**
+</Step>
+
+<Step>
+**Suppression isolation.** Confirm suppression (bounces/complaints/unsubscribes) is Team-scoped: a recipient suppressed in Team B must not appear suppressed for Team A, and vice-versa. One product's suppression list must not silently block another product's sends.
+</Step>
+
+</Steps>
+
+A minimal IDOR probe — Team A's key against a Team B email id — should look like this and must **not** return `200`:
+
+```bash
+# Using Team A's key against a known Team B email id → expect 403/404, never 200
+curl -i https://mail.everjust.app/api/v1/emails/<team_b_email_id> \
+  -H "Authorization: Bearer us_teamA_key"
+```
+
+<Callout type="error">
+If any step returns another Team's data or performs an action on it, isolation is broken for that endpoint. Report it, patch/upgrade, and re-test the whole checklist before hosting unrelated commercial tenants together. Until then, keep sensitive products on separate useSend instances.
+</Callout>
+
+## Reputation isolation
+
+Query-level isolation keeps data apart. It does **not** keep sender reputation apart — that is a property of AWS SES, not useSend. If two products share the same SES sending identity and reputation surface, one product's bounce and complaint rates can drag down the other's inbox placement.
+
+Give each high-value tenant its own reputation surface:
+
+- **Dedicated SES configuration set per Team.** A configuration set is where SES tracks reputation metrics and event publishing. Isolating it per tenant means bounces and complaints are attributed and (optionally) throttled per product rather than pooled.
+- **Dedicated IP pool (optional, for volume senders).** For a product with meaningful volume and its own reputation to protect, assign a dedicated IP (pool) so its sending reputation is fully independent of the shared warm-up pool. Low-volume tenants are usually better on the shared pool — a dedicated IP needs consistent volume to stay warm.
+
+Configuration sets and IP pools are provisioned on the AWS/SES side (Terraform infra lives in the repo below), then bound to the tenant's domain. Plan this at Team-creation time for any product whose deliverability you cannot afford to have coupled to another's.
+
+<Callout type="info">
+Two self-hosted specifics that affect isolation testing here: **rate limiting is disabled** on this instance, so a misbehaving tenant is throttled only at the SES layer — another reason per-Team configuration sets matter. And SES is currently in **sandbox**, so isolation tests can only send to verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@`, `complaint@`) — the `bounce@` and `complaint@` simulator addresses are the clean way to exercise suppression-isolation tests without harming real reputation.
+</Callout>
+
+## Repo
+
+Terraform for the SES configuration sets and IP pools, plus the useSend deployment and these docs, lives in the private repo `github.com/EVERJUST-DEV/usesend-email`. Record the pinned useSend version there alongside the last isolation-test run.
+
+<Cards>
+  <Card title="Teams & API Keys" href="/docs/teams-api-keys">How Teams and us_ keys are provisioned per product.</Card>
+  <Card title="Domains" href="/docs/domains">Verifying and binding sending domains to a Team.</Card>
+  <Card title="Suppressions" href="/docs/suppressions">Team-scoped bounce, complaint, and unsubscribe handling.</Card>
+</Cards>

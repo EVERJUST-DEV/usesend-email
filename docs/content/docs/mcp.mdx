@@ -1,0 +1,197 @@
+---
+title: MCP Server
+description: Run the useSend MCP server so AI agents like Claude Code, Claude Desktop, and Cursor can send email and manage domains, contacts, campaigns, and analytics on the EverJust instance.
+---
+
+The repo ships an [MCP](https://modelcontextprotocol.io) server under `mcp/` — a Node/TypeScript server that speaks the Model Context Protocol over **stdio**. It exposes the useSend REST API as a set of tools so an AI agent can send transactional email, manage sending domains, maintain contact books, run campaigns, and read analytics against the EverJust instance at `https://mail.everjust.app`.
+
+It is a thin wrapper over the [REST API](/docs/api-reference): every tool maps to one endpoint, authenticates with a `us_` Bearer key, and returns the raw JSON envelope. Anything the API can do, the agent can do.
+
+<Callout type="warn">
+  A useSend API key grants **send access** to a Team — anything holding it can send mail as your domains and read your contacts. Scope one key per product (one Team per product), pass it to the server through the environment only, and **never commit it** to the repo or an MCP config that lives in version control.
+</Callout>
+
+## Build and run
+
+The server has no runtime config file — it reads two environment variables and talks stdio. Build it once, then point your MCP client at the compiled entrypoint.
+
+<Steps>
+<Step>
+### Install and build
+
+```bash
+cd mcp
+npm install
+npm run build
+```
+
+`npm run build` runs `tsc` and emits `dist/index.js` (the `bin` entrypoint `usesend-mcp`).
+</Step>
+
+<Step>
+### Provide credentials
+
+The server reads its configuration from the environment:
+
+| Variable | Required | Value |
+| --- | --- | --- |
+| `USESEND_API_KEY` | yes | Your Team's key, e.g. `us_xxx`. Sent as `Authorization: Bearer us_xxx`. |
+| `USESEND_BASE_URL` | yes (for self-hosted) | `https://mail.everjust.app/api/v1` |
+
+If `USESEND_BASE_URL` is omitted the server defaults to the useSend cloud — always set it to the EverJust base URL. The base URL is normalized: a root without `/api/v1` has it appended automatically.
+</Step>
+
+<Step>
+### Run
+
+```bash
+node dist/index.js
+```
+
+The process serves MCP over stdio and stays attached to the client that launched it. You normally do **not** run it by hand — your MCP client spawns it (see [Client configuration](#client-configuration)). Run it directly only to confirm it starts without throwing `USESEND_API_KEY is not set`.
+</Step>
+</Steps>
+
+<Callout type="info">
+  Rate limiting is **disabled** on the self-hosted instance, so the server does not back off or throttle. SES is currently in **sandbox**: sends only reach verified addresses or the SES mailbox simulator (`success@simulator.amazonses.com`, `bounce@…`, `complaint@…`) until AWS grants production access. See [Sending email](/docs/emails) for details.
+</Callout>
+
+## Client configuration
+
+Register the server with your MCP client by pointing `command`/`args` at the built entrypoint and passing credentials via `env`. Use an **absolute path** to `dist/index.js` — the client sets no working directory.
+
+<Tabs items={['Claude Desktop / Code', 'Cursor']}>
+<Tab value="Claude Desktop / Code">
+
+Add to your MCP config (Claude Desktop: `claude_desktop_config.json`; Claude Code: `.mcp.json` or `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "usesend": {
+      "command": "node",
+      "args": ["/abs/path/usesend-email/mcp/dist/index.js"],
+      "env": {
+        "USESEND_API_KEY": "us_...",
+        "USESEND_BASE_URL": "https://mail.everjust.app/api/v1"
+      }
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="Cursor">
+
+Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project) — the shape is identical:
+
+```json
+{
+  "mcpServers": {
+    "usesend": {
+      "command": "node",
+      "args": ["/abs/path/usesend-email/mcp/dist/index.js"],
+      "env": {
+        "USESEND_API_KEY": "us_...",
+        "USESEND_BASE_URL": "https://mail.everjust.app/api/v1"
+      }
+    }
+  }
+}
+```
+
+</Tab>
+</Tabs>
+
+Replace `/abs/path/usesend-email` with the real checkout location and `us_...` with the key for that product's Team. Restart the client after editing so it re-spawns the server.
+
+## Tools
+
+Every tool corresponds to one REST endpoint. Fields, enums, and response shapes match the [API reference](/docs/api-reference) exactly — the server neither adds nor renames fields.
+
+### Emails
+
+| Tool | Endpoint | Purpose |
+| --- | --- | --- |
+| `send_email` | `POST /emails` | Send one email. `to` + `from` required; `subject` **or** `templateId`, and `text` **or** `html`. Accepts an optional idempotency key. |
+| `send_batch` | `POST /emails/batch` | Send an array of email objects (max 100) in one call. |
+| `get_email` | `GET /emails/{emailId}` | Fetch one email with its `emailEvents` status history. |
+| `list_emails` | `GET /emails` | List emails with `page`, `limit`, `startDate`, `endDate`, `domainId`. |
+| `reschedule_email` | `PATCH /emails/{emailId}` | Change `scheduledAt` on a scheduled email. |
+| `cancel_email` | `POST /emails/{emailId}/cancel` | Cancel a scheduled email. |
+
+### Domains
+
+Domain path IDs are **numbers**.
+
+| Tool | Endpoint | Purpose |
+| --- | --- | --- |
+| `create_domain` | `POST /domains` | Add a sending domain (`name` + `region`, e.g. `us-east-1`). |
+| `list_domains` | `GET /domains` | List all domains for the Team. |
+| `get_domain` | `GET /domains/{id}` | Fetch one domain, including `dnsRecords`. |
+| `verify_domain` | `PUT /domains/{id}/verify` | Trigger DNS/DKIM re-verification. |
+| `delete_domain` | `DELETE /domains/{id}` | Delete a domain. |
+
+<Callout type="info">
+  `send.everjust.app` is already created and fully verified (DKIM/SPF/DMARC/MAIL FROM). Use these tools to add domains for other products, not to re-provision the existing one.
+</Callout>
+
+### Contact books and contacts
+
+| Tool | Endpoint | Purpose |
+| --- | --- | --- |
+| `create_contact_book` | `POST /contactBooks` | Create a contact book (`name` required). |
+| `list_contact_books` | `GET /contactBooks` | List contact books. |
+| `get_contact_book` | `GET /contactBooks/{contactBookId}` | Fetch one contact book. |
+| `update_contact_book` | `PATCH /contactBooks/{contactBookId}` | Update a contact book. |
+| `delete_contact_book` | `DELETE /contactBooks/{contactBookId}` | Delete a contact book. |
+| `create_contact` | `POST /contactBooks/{contactBookId}/contacts` | Add a contact (`email` required). |
+| `list_contacts` | `GET /contactBooks/{contactBookId}/contacts` | List/filter contacts (`emails`, `ids`, `page`, `limit`). |
+| `get_contact` | `GET …/contacts/{contactId}` | Fetch one contact. |
+| `update_contact` | `PATCH …/contacts/{contactId}` | Update contact fields. |
+| `upsert_contact` | `PUT …/contacts/{contactId}` | Upsert by email (`email` required). |
+| `delete_contact` | `DELETE …/contacts/{contactId}` | Delete a contact. |
+| `bulk_create_contacts` | `POST …/contacts/bulk` | Create many contacts from an array. |
+| `bulk_delete_contacts` | `DELETE …/contacts/bulk` | Delete many by `contactIds`. |
+
+### Campaigns
+
+Campaigns are the "Broadcasts" feature — bulk sends to a contact book.
+
+| Tool | Endpoint | Purpose |
+| --- | --- | --- |
+| `create_campaign` | `POST /campaigns` | Create a campaign (`name`, `from`, `subject`, `contactBookId` required). |
+| `list_campaigns` | `GET /campaigns` | List campaigns (`page`, `status`, `search`). |
+| `get_campaign` | `GET /campaigns/{campaignId}` | Fetch one campaign. |
+| `delete_campaign` | `DELETE /campaigns/{campaignId}` | Delete a campaign. |
+| `schedule_campaign` | `POST /campaigns/{id}/schedule` | Schedule a send (`scheduledAt`, `batchSize`). |
+| `pause_campaign` | `POST /campaigns/{id}/pause` | Pause a running campaign. |
+| `resume_campaign` | `POST /campaigns/{id}/resume` | Resume a paused campaign. |
+
+### Analytics
+
+| Tool | Endpoint | Purpose |
+| --- | --- | --- |
+| `email_time_series` | `GET /analytics/email-time-series` | Daily sent/delivered/opened/clicked/bounced/complained (`days` = `7`\|`30`, `domainId`). |
+| `reputation_metrics` | `GET /analytics/reputation-metrics` | `delivered`, `hardBounced`, `complained`, `bounceRate`, `complaintRate` (`domainId`). |
+
+<Callout type="info">
+  Templates, suppressions, webhooks, and API-key creation are dashboard/tRPC-only and have **no** REST endpoints, so the MCP server exposes no tools for them. Reference a template on a send with `templateId` + `variables`; manage webhooks and keys at [mail.everjust.app](https://mail.everjust.app).
+</Callout>
+
+## Example agent prompt
+
+With the server registered, an agent can act in natural language and the tools resolve to API calls:
+
+> Send a receipt to `success@simulator.amazonses.com` from `EverJust <hello@send.everjust.app>` with subject "Your receipt" and an HTML body listing one line item, $19.00. Then show me its delivery status.
+
+The agent calls `send_email`, then `get_email` with the returned `emailId` to read the `emailEvents` history. Because SES is in sandbox, use a verified address or the simulator (as above) as the recipient until production access is granted.
+
+## Next steps
+
+<Cards>
+  <Card title="Sending email" href="/docs/emails">The send payload, scheduling, sandbox rules, and status enum.</Card>
+  <Card title="API reference" href="/docs/api-reference">Every endpoint, field, and error code the tools wrap.</Card>
+  <Card title="Domains" href="/docs/domains">Provisioning and verifying sending domains.</Card>
+  <Card title="Webhooks" href="/docs/webhooks">Delivery events and signature verification (dashboard-configured).</Card>
+</Cards>
