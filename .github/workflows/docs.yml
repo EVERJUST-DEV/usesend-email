@@ -53,6 +53,10 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # Soft-fail while Pages is disabled (private-repo Pages needs a paid plan), so
+    # the build stays green. Once Pages is enabled (Settings → Pages → Source:
+    # GitHub Actions), this deploys automatically on every docs change.
+    continue-on-error: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
