@@ -36,10 +36,10 @@ jobs:
       - name: Build (Next static export)
         run: npm run build
         env:
-          # Project Pages is served under /usesend-email. For a custom domain,
-          # set this to an empty string (and NEXT_PUBLIC_SITE_URL to the domain).
-          NEXT_PUBLIC_BASE_PATH: /usesend-email
-          NEXT_PUBLIC_SITE_URL: https://everjust-dev.github.io/usesend-email
+          # Served at the root of the custom domain docs.everjust.app (see the
+          # CNAME file in docs/public), so no base path.
+          NEXT_PUBLIC_BASE_PATH: ""
+          NEXT_PUBLIC_SITE_URL: https://docs.everjust.app
       - name: Disable Jekyll (serve _next/ as-is)
         run: touch out/.nojekyll
       - name: Upload Pages artifact

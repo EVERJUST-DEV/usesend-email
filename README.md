@@ -35,17 +35,16 @@ usesend-email/
 
 ## Documentation
 
-Full product docs live in [`docs/`](docs/content/docs/) (a Fumadocs site) and are
-built + deployed to **GitHub Pages** by [`.github/workflows/docs.yml`](.github/workflows/docs.yml)
-on every push that touches `docs/` — so they stay in sync with the repo. The
+Full product docs are published at **https://docs.everjust.app**. The source lives
+in [`docs/`](docs/content/docs/) (a Fumadocs site) and is built + deployed to
+**GitHub Pages** by [`.github/workflows/docs.yml`](.github/workflows/docs.yml) on
+every push that touches `docs/` — so the site stays in sync with the repo. The
 [`mcp/`](mcp/) directory is a Model Context Protocol server that lets AI agents
 send mail and manage the account; see [`docs/content/docs/mcp.mdx`](docs/content/docs/mcp.mdx)
 and [`mcp/README.md`](mcp/README.md). A machine-readable index for agents is at
 [`docs/public/llms.txt`](docs/public/llms.txt).
 
-> Private-repo GitHub Pages needs a paid plan. Until it's enabled, the workflow's
-> **build** job still validates the docs on every push; read the pages as MDX in
-> `docs/content/docs/`, or run the site locally (`cd docs && npm install && npm run dev`).
+> Run the site locally with `cd docs && npm install && npm run dev`.
 
 ## What gets provisioned (AWS)
 
