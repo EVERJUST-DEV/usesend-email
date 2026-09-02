@@ -1,9 +1,10 @@
 # Build the Fumadocs static export, then serve it with nginx under /docs.
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json ./
-RUN npm install --legacy-peer-deps
+# Copy the full source before installing — fumadocs-mdx's postinstall needs the
+# project files (source.config.ts etc.); installing with only package.json fails.
 COPY . .
+RUN npm install --legacy-peer-deps
 # basePath defaults to /docs (next.config.mjs) → links/assets under /docs.
 RUN npm run build
 
