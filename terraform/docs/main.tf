@@ -1,15 +1,8 @@
 # =============================================================================
 # Docs hosting: serve the static Fumadocs site at mail.everjust.app/docs.
-# A small nginx container (static export baked in) runs as its OWN ECS service
-# behind the SAME ALB, reached via a /docs* listener rule. The app's default
-# routing is untouched. Image is built + pushed by CI (.github/workflows/docs.yml).
+# A small nginx container (static export baked in) runs as its own ECS service
+# behind the SAME ALB, via a /docs* listener rule. The app is untouched.
 # =============================================================================
-
-variable "docs_image_tag" {
-  description = "ECR image tag for the docs container (CI passes the git SHA)."
-  type        = string
-  default     = "latest"
-}
 
 resource "aws_ecr_repository" "docs" {
   name                 = "${var.project_name}-docs"
@@ -20,7 +13,6 @@ resource "aws_ecr_repository" "docs" {
   }
 }
 
-# Keep only the last few images.
 resource "aws_ecr_lifecycle_policy" "docs" {
   repository = aws_ecr_repository.docs.name
   policy = jsonencode({
@@ -38,18 +30,17 @@ resource "aws_cloudwatch_log_group" "docs" {
   retention_in_days = 30
 }
 
-# Docs tasks: accept 8080 only from the ALB. Separate SG so the app SG is untouched.
 resource "aws_security_group" "docs" {
   name        = "${var.project_name}-docs"
   description = "useSend docs container"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.main.id
 
   ingress {
     description     = "docs http from ALB"
     from_port       = 8080
     to_port         = 8080
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+    security_groups = [data.aws_security_group.alb.id]
   }
   egress {
     from_port   = 0
@@ -66,13 +57,13 @@ resource "aws_ecs_task_definition" "docs" {
   network_mode             = "awsvpc"
   cpu                      = 256
   memory                   = 512
-  execution_role_arn       = aws_iam_role.execution.arn
+  execution_role_arn       = data.aws_iam_role.execution.arn
 
   container_definitions = jsonencode([
     {
-      name      = "docs"
-      image     = "${aws_ecr_repository.docs.repository_url}:${var.docs_image_tag}"
-      essential = true
+      name         = "docs"
+      image        = "${aws_ecr_repository.docs.repository_url}:${var.docs_image_tag}"
+      essential    = true
       portMappings = [{ containerPort = 8080, protocol = "tcp" }]
       logConfiguration = {
         logDriver = "awslogs"
@@ -90,7 +81,7 @@ resource "aws_lb_target_group" "docs" {
   name        = "${var.project_name}-docs"
   port        = 8080
   protocol    = "HTTP"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.main.id
   target_type = "ip"
 
   health_check {
@@ -102,9 +93,8 @@ resource "aws_lb_target_group" "docs" {
   }
 }
 
-# Route /docs and /docs/* on the existing HTTPS listener to the docs service.
 resource "aws_lb_listener_rule" "docs" {
-  listener_arn = aws_lb_listener.https.arn
+  listener_arn = data.aws_lb_listener.https.arn
   priority     = 10
 
   action {
@@ -120,13 +110,13 @@ resource "aws_lb_listener_rule" "docs" {
 
 resource "aws_ecs_service" "docs" {
   name            = "${var.project_name}-docs"
-  cluster         = aws_ecs_cluster.main.id
+  cluster         = data.aws_ecs_cluster.main.arn
   task_definition = aws_ecs_task_definition.docs.arn
   desired_count   = 1
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = aws_subnet.public[*].id
+    subnets          = data.aws_subnets.public.ids
     security_groups  = [aws_security_group.docs.id]
     assign_public_ip = true
   }
@@ -139,8 +129,4 @@ resource "aws_ecs_service" "docs" {
 
   health_check_grace_period_seconds = 60
   depends_on                        = [aws_lb_listener_rule.docs]
-}
-
-output "docs_ecr_url" {
-  value = aws_ecr_repository.docs.repository_url
 }
