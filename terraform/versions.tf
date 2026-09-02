@@ -24,13 +24,12 @@ terraform {
   #     --key-schema AttributeName=LockID,KeyType=HASH \
   #     --billing-mode PAY_PER_REQUEST --region us-east-1
   # ---------------------------------------------------------------------------
-  # backend "s3" {
-  #   bucket         = "usesend-tfstate-<account-id>"
-  #   key            = "usesend/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "usesend-tflock"
-  #   encrypt        = true
-  # }
+  backend "s3" {
+    bucket  = "usesend-tfstate-678806349176"
+    key     = "usesend/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+  }
 }
 
 provider "aws" {

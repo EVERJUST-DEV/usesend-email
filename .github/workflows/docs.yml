@@ -1,32 +1,82 @@
 name: Docs
 
-# Validates the Fumadocs static export builds under the /docs base path.
-# (Container build + ECS deploy to mail.everjust.app/docs are added next.)
+# Build the Fumadocs static export into an nginx image, push to ECR, and deploy
+# the docs ECS service behind the ALB (mail.everjust.app/docs). Runs on every
+# docs change. All AWS work happens here (keyless via GitHub OIDC), so it never
+# depends on a developer's clock/tooling.
 on:
   push:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'terraform/docs-hosting.tf'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ROLE_ARN: arn:aws:iam::678806349176:role/usesend-ci-deploy
+  # Scope every apply to just the docs resources so the running app is untouched.
+  TARGETS: >-
+    -target=aws_ecr_repository.docs
+    -target=aws_ecr_lifecycle_policy.docs
+    -target=aws_cloudwatch_log_group.docs
+    -target=aws_security_group.docs
+    -target=aws_ecs_task_definition.docs
+    -target=aws_lb_target_group.docs
+    -target=aws_lb_listener_rule.docs
+    -target=aws_ecs_service.docs
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: docs
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          node-version: 20
-      - name: Install
-        run: npm install --legacy-peer-deps
-      - name: Build (Next static export, basePath /docs)
-        run: npm run build
-      - name: Verify /docs base path nesting
-        run: test -f out/docs/index.html && echo "out/docs/index.html present ✓" || (echo "MISSING out/docs/index.html"; exit 1)
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: Ensure ECR repository
+        working-directory: terraform
+        run: terraform apply -input=false -auto-approve -target=aws_ecr_repository.docs
+
+      - name: Build + push docs image
+        working-directory: docs
+        run: |
+          set -euo pipefail
+          ECR=$(cd ../terraform && terraform output -raw docs_ecr_url)
+          echo "ECR=$ECR"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "${ECR%%/*}"
+          docker build -t "$ECR:$GITHUB_SHA" -t "$ECR:latest" .
+          docker push "$ECR:$GITHUB_SHA"
+          docker push "$ECR:latest"
+
+      - name: Terraform apply (docs infra)
+        working-directory: terraform
+        run: terraform apply -input=false -auto-approve -var="docs_image_tag=$GITHUB_SHA" $TARGETS
+
+      - name: Wait for docs service to stabilize
+        run: |
+          aws ecs wait services-stable --cluster usesend-cluster --services usesend-docs --region "$AWS_REGION" || true
+          aws ecs describe-services --cluster usesend-cluster --services usesend-docs --region "$AWS_REGION" \
+            --query 'services[0].{running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}' --output json
