@@ -136,3 +136,9 @@ variable "github_client_secret" {
     error_message = "github_client_secret is required. Export it before apply: export TF_VAR_github_client_secret='...'"
   }
 }
+
+variable "db_snapshot_identifier" {
+  description = "Optional RDS snapshot identifier/ARN to restore the database from (account migration). Leave null for a fresh database."
+  type        = string
+  default     = null
+}
