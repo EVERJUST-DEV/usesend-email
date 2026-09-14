@@ -142,3 +142,9 @@ variable "db_snapshot_identifier" {
   type        = string
   default     = null
 }
+
+variable "db_backup_retention" {
+  description = "RDS automated backup retention in days. The AWS Free Plan caps this; raise to 7 after the account is upgraded to a paid plan."
+  type        = number
+  default     = 7
+}

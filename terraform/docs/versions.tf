@@ -8,7 +8,7 @@ terraform {
   }
   # Separate state from the app so this deploys without any app variables/secrets.
   backend "s3" {
-    bucket  = "usesend-tfstate-678806349176"
+    bucket  = "usesend-tfstate-642195693702"
     key     = "usesend/docs.tfstate"
     region  = "us-east-1"
     encrypt = true
