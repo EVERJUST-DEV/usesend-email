@@ -24,7 +24,7 @@ concurrency:
 
 env:
   AWS_REGION: us-east-1
-  ROLE_ARN: arn:aws:iam::678806349176:role/usesend-ci-deploy
+  ROLE_ARN: arn:aws:iam::642195693702:role/usesend-ci-deploy
 
 jobs:
   deploy:
