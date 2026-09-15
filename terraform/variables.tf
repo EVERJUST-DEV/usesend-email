@@ -136,3 +136,15 @@ variable "github_client_secret" {
     error_message = "github_client_secret is required. Export it before apply: export TF_VAR_github_client_secret='...'"
   }
 }
+
+variable "db_snapshot_identifier" {
+  description = "Optional RDS snapshot identifier/ARN to restore the database from (account migration). Leave null for a fresh database."
+  type        = string
+  default     = null
+}
+
+variable "db_backup_retention" {
+  description = "RDS automated backup retention in days. The AWS Free Plan caps this; raise to 7 after the account is upgraded to a paid plan."
+  type        = number
+  default     = 7
+}
