@@ -51,5 +51,13 @@ resource "aws_db_instance" "main" {
   # small). Enable once you're on db.t4g.medium+ / db.m*/r*.
   performance_insights_enabled = false
 
+  # Account migration: restore from a snapshot when one is given. Ignored after creation so a
+  # later apply can never replace a live database just because this variable changed.
+  snapshot_identifier = var.db_snapshot_identifier
+
   tags = { Name = "${var.project_name}-pg" }
+
+  lifecycle {
+    ignore_changes = [snapshot_identifier]
+  }
 }
