@@ -44,6 +44,11 @@ resource "aws_ecs_task_definition" "app" {
       # compose (docker/prod/compose.yml).
       environment = [
         { name = "PORT", value = tostring(var.app_port) },
+        # Next.js standalone binds to $HOSTNAME, and Fargate sets HOSTNAME to the
+        # task's own name (ip-10-42-x-x.ec2.internal). The container health check
+        # below calls 127.0.0.1, so bind every interface. Without this the check
+        # never passes, and ECS replaced the task every few minutes (2026-09-15).
+        { name = "HOSTNAME", value = "0.0.0.0" },
         # NEXTAUTH_URL must be the public app URL; it's also used to build the
         # SNS callback (https://<app>/api/ses_callback) and the OAuth callback.
         { name = "NEXTAUTH_URL", value = "https://${var.app_domain}" },
@@ -70,7 +75,7 @@ resource "aws_ecs_task_definition" "app" {
       ]
 
       healthCheck = {
-        command     = ["CMD-SHELL", "node -e \"fetch('http://localhost:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+        command     = ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
         interval    = 30
         timeout     = 5
         retries     = 3
