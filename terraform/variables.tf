@@ -51,7 +51,10 @@ variable "app_port" {
 variable "usesend_image" {
   description = "Fully-qualified useSend container image (registry/name:tag). Pin a version tag for production rather than :latest."
   type        = string
-  default     = "usesend/usesend:latest"
+  # v1.9.8, the version running since the 2026-09-15 account move. :latest is
+  # mutable, so every task replacement could silently upgrade the app and run
+  # its database migrations. Bump this deliberately.
+  default     = "usesend/usesend@sha256:2b2939e10d0861c336cede3de04d5dbcdb28b4eceda249ff57b4d2773259fff0"
 }
 
 # useSend self-host is a SINGLE Next.js process; BullMQ workers run in-process.
